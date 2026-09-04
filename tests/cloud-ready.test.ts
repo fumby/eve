@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { sameOrigin } from "../src/face/origin.js";
+import { sameOrigin, isAllowedHost } from "../src/face/origin.js";
 import { writeFileAtomic } from "../src/core/atomic.js";
 import { localDate, localMinute } from "../src/core/time.js";
 
@@ -37,6 +37,35 @@ test("sameOrigin: any other site opening her socket is rejected", () => {
   assert.equal(sameOrigin("http://127.0.0.1:3939", undefined), false);
   // A lookalike host must not pass on a prefix/suffix match.
   assert.equal(sameOrigin("https://eve.tail1234.ts.net.evil.example", "eve.tail1234.ts.net"), false);
+});
+
+// Matching Origin against Host answers "do these agree?", which is the wrong
+// question when one attacker supplies both. A page on evil.com whose DNS flips
+// to 127.0.0.1 sends Origin: http://evil.com AND Host: evil.com — they agree
+// perfectly and name nowhere EVE is served. Every line here was accepted until
+// the check also required the host to be a name she answers to.
+test("sameOrigin: DNS rebinding cannot satisfy the check by agreeing with itself", () => {
+  assert.equal(sameOrigin("http://evil.example", "evil.example:3939"), false);
+  assert.equal(sameOrigin("http://evil.example:3939", "evil.example:3939"), false);
+  assert.equal(sameOrigin("https://evil.example", "evil.example"), false);
+  // The same trick carried on the proxy header instead.
+  assert.equal(sameOrigin("http://evil.example", "127.0.0.1:3939", "evil.example"), false);
+  assert.equal(sameOrigin("http://evil.example", "evil.example:3939", "evil.example:3939"), false);
+  // Hosts that merely end in the right letters are not the tailnet, and a
+  // subdomain of the word localhost is not this machine.
+  assert.equal(sameOrigin("https://evilts.net", "evilts.net"), false);
+  assert.equal(sameOrigin("https://ts.net.evil.example", "ts.net.evil.example"), false);
+  assert.equal(sameOrigin("http://localhost.evil.example", "localhost.evil.example"), false);
+});
+
+test("isAllowedHost: only this machine and the tailnet are names she answers to", () => {
+  for (const h of ["localhost", "127.0.0.1", "::1", "[::1]", "eve.tail1234.ts.net"]) {
+    assert.equal(isAllowedHost(h), true, h);
+  }
+  for (const h of ["evil.example", "localhost.evil.example", "evilts.net", "ts.net.evil.example", ""]) {
+    assert.equal(isAllowedHost(h), false, JSON.stringify(h));
+  }
+  assert.equal(isAllowedHost(null), false);
 });
 
 test("writeFileAtomic: the target holds the full contents and no temp file is left behind", () => {
