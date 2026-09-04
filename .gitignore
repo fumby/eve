@@ -13,6 +13,11 @@
 /data/
 /logs/
 
+# The operator's own identity and ledger notes, created by copying the
+# .example.md templates next to them. The templates ship; the real ones never do.
+/brain/identity.md
+/brain/ledger-schema.md
+
 # Per-machine: where EVE.app should look for her (tailnet URL after the move)
 desktop/eve-url.txt
 
