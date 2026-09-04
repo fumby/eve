@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="bg-root"></div>
+  <div id="orb-root"></div>
+
+  <header id="hdr" class="glass">
+    <div class="wordmark">EVE<span class="wordmark-dot"></span></div>
+    <div class="hdr-right">
+      <button id="alertsBtn" class="ghost" title="Notices">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span id="alertBadge" class="badge" hidden></span>
+      </button>
+      <button id="pauseBtn" class="ghost" title="Pause all proactive behavior">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+      </button>
+      <span id="statusDot" class="status-dot idle" title="idle"></span>
+    </div>
+  </header>
+
+  <aside id="panel" class="glass">
+    <button id="collapseBtn" class="ghost collapse-btn" title="Collapse">‹</button>
+    <div id="panelBody">
+      <section><h4>Notices <span class="count" id="cNotices">0</span></h4><div id="sNotices"></div></section>
+      <section><h4>Reminders <span class="count" id="cReminders">0</span></h4><div id="sReminders"></div></section>
+      <section><h4>Memory <span class="count" id="cFacts">0</span></h4><div id="sFacts"></div></section>
+      <section><h4>Usage today</h4><div id="sUsage" class="entry dim"></div></section>
+    </div>
+  </aside>
+
+  <div id="cards"></div>
+  <div id="agent-labels" aria-hidden="true"></div>
+
+  <div id="micbar">
+    <button id="micBtn" aria-label="Talk to EVE">
+      <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg>
+      <svg id="stopIcon" viewBox="0 0 24 24" fill="currentColor" hidden><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+    </button>
+    <div class="hint">TAP OR SAY &ldquo;HEY EVE&rdquo;</div>
+  </div>
+
+  <script type="module" src="scene/main.js"></script>
+  <script type="module" src="shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE · Mind</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/mind/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="labels"></div>
+
+  <header id="hdr">
+    <div class="brand">EVE<span class="dot"></span><span class="sub">mind</span></div>
+    <input id="search" type="search" placeholder="search memories, tools, files…" autocomplete="off" />
+    <div id="stats" class="stats">loading…</div>
+  </header>
+
+  <div id="legend"></div>
+  <div id="tooltip" hidden></div>
+
+  <aside id="inspector" hidden>
+    <button id="closeInspector" aria-label="Close">×</button>
+    <div id="inspectorBody"></div>
+  </aside>
+
+  <script type="module" src="/mind/scene.js"></script>
+</body>
+</html>

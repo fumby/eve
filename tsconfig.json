@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "dist"
+  },
+  // scripts/ is included on purpose: it is executable code that talks to the
+  // real model and the real filesystem, and leaving it out meant a broken
+  // reference there compiled clean and only failed once someone paid to run it.
+  // tests/ stays out for now — it imports the untyped browser JS under
+  // face/scene/, which is its own cleanup.
+  "include": ["src", "scripts"]
+}

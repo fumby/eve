@@ -1,0 +1,112 @@
+{
+  "model": "claude-sonnet-5",
+  "effort": "low",
+  "maxTokens": 2048,
+  "voice": {
+    "voiceId": "",
+    "ttsModel": "eleven_flash_v2_5"
+  },
+  "stt": {
+    "model": "nova-3",
+    "language": "multi",
+    "keyterms": [
+      "Eve"
+    ],
+    "scribeModel": "scribe_v2",
+    "diarize": true
+  },
+  "studiesDir": "",
+  "projects": {},
+  "location": {
+    "city": "",
+    "lat": null,
+    "lon": null
+  },
+  "quietHours": {
+    "start": "22:30",
+    "end": "08:00"
+  },
+  "heartbeat": {
+    "paused": false,
+    "tickSeconds": 60,
+    "checks": [
+      {
+        "name": "due-reminders",
+        "kind": "due_reminders",
+        "intervalMinutes": 5,
+        "loudness": "loud"
+      },
+      {
+        "name": "daily-briefing",
+        "kind": "daily_briefing",
+        "at": "08:00",
+        "intervalMinutes": 1440,
+        "loudness": "loud"
+      },
+      {
+        "name": "board-review",
+        "kind": "board_review",
+        "intervalMinutes": 43200,
+        "loudness": "loud"
+      },
+      {
+        "name": "repo-watch",
+        "kind": "repo_watch",
+        "intervalMinutes": 1,
+        "loudness": "loud"
+      }
+    ]
+  },
+  "confirmOverrides": {},
+  "pricing": {
+    "inputPerMTok": 3,
+    "outputPerMTok": 15
+  },
+  "face": {
+    "port": 3939
+  },
+  "geocodeLanguages": [
+    "en",
+    "it"
+  ],
+  "board": {
+    "maxMeetingUSD": 0.35
+  },
+  "memory": {
+    "resumeWindowMinutes": 45,
+    "liveWindowExchanges": 30,
+    "checkpointAfterExchanges": 12,
+    "extractorModel": "claude-haiku-4-5-20251001"
+  },
+  "embeddings": {
+    "model": "voyage-4-large"
+  },
+  "watch": {
+    "repos": [],
+    "branches": [
+      "main",
+      "master",
+      "production"
+    ],
+    "stalePRHours": 48,
+    "dormantDays": 30
+  },
+  "design": {
+    "projects": {
+      "eve": "design"
+    },
+    "plannerModel": "claude-sonnet-5",
+    "composerModel": "claude-sonnet-5",
+    "maxDispatchUsd": 10,
+    "composerMaxTurns": 40,
+    "imageModels": {
+      "standard": "gemini-2.5-flash-image",
+      "premium": "gemini-3-pro-image-preview"
+    }
+  },
+  "factory": {
+    "dailyCap": 5,
+    "maxRevisions": 3,
+    "model": "claude-sonnet-5"
+  }
+}

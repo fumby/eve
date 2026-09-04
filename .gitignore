@@ -1,0 +1,39 @@
+# Secrets — never committed
+.env
+
+# Personal state — EVE's memory and data stay on this machine.
+# Anchored to the root on purpose: a bare "memory/" once silently swallowed
+# src/memory/ and three commits shipped without their own code.
+/memory/*
+# …except the templates that show the SHAPE of the core files. The real
+# ones (me.md, studies.md, …) stay ignored by the line above.
+!/memory/core/
+/memory/core/*
+!/memory/core/*.example.md
+/data/
+/logs/
+
+# Per-machine: where EVE.app should look for her (tailnet URL after the move)
+desktop/eve-url.txt
+
+# Voice test recordings — personal, never in the repo
+*.wav
+*.aiff
+
+# Build/deps
+node_modules/
+dist/
+.DS_Store
+desktop/venv/
+desktop/dist/
+desktop/*.png
+desktop/*.iconset
+desktop/*.icns
+__pycache__/
+
+# Head-of-design: per-project preview apps are generated (Next + node_modules + out/)
+**/.prism/preview/
+
+# Editor/backup copies of .env carry the same secrets
+.env.*
+!.env.example
