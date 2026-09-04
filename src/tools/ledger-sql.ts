@@ -99,8 +99,17 @@ export function tokenize(input: string): SqlViews {
         i++;
       }
       if (!closed) throw new Error('that SQL has an unterminated "quoted identifier"');
-      sql += input.slice(start, i);
-      code += '"?"';
+      const raw = input.slice(start, i);
+      sql += raw;
+      // Blanking a quoted identifier is right almost everywhere: a column named
+      // "update" is data, not a write, and the keyword rules must not see it.
+      // In FUNCTION position it is exactly backwards — Postgres resolves
+      // "pg_sleep"(10) to the same function as pg_sleep(10), so blanking hid the
+      // one name the blocklist exists to read. Only a following paren unquotes
+      // it, which leaves `… AS "x"(a, b)` (a column alias list) still harmless.
+      let j = i;
+      while (j < n && /\s/.test(input[j]!)) j++;
+      code += input[j] === "(" ? raw.slice(1, -1).replace(/""/g, '"') : '"?"';
       continue;
     }
     // $tag$ ... $tag$ dollar quoting

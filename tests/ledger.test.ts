@@ -76,6 +76,28 @@ test("validator: multi-statement and parameter tricks are refused", () => {
   bad("select " + "1 + ".repeat(2000) + "1", /characters/);
 });
 
+test("validator: a quoted identifier can't smuggle a blocked function past the guard", () => {
+  // Blanking "quoted identifiers" in the code view is right for keywords — a
+  // column named "update" is data, not a write. But Postgres resolves
+  // "pg_sleep"(10) to exactly the same function as pg_sleep(10), so in FUNCTION
+  // position the name still matters, and blanking it hid the one thing the
+  // blocklist exists to see. Every line below passed the guard until the
+  // tokenizer started unquoting an identifier that is followed by a paren.
+  bad('select "pg_sleep"(10)', /pg_sleep/);
+  bad('select "pg_catalog"."pg_sleep"(10)', /pg_sleep/);
+  bad("select \"pg_read_file\"('/etc/passwd')", /pg_read_file/);
+  bad("select \"dblink\"('a','b')", /dblink/);
+  bad('select "pg_notify"(\'c\',\'p\')', /pg_notify/);
+  bad('select "pg_sleep" (10)', /pg_sleep/); // whitespace before the paren
+  // …and the blanking still has to hold everywhere else, or a table named after
+  // a keyword becomes unqueryable.
+  ok('select "update" from t');
+  ok('select * from "drop table"');
+  ok('select "select" from "delete"');
+  // A quoted alias carrying a column list is a paren that means nothing here.
+  ok('select * from t as "x"(a, b)');
+});
+
 test("validator returns runnable SQL: comments gone, literals kept, trailing ; gone", () => {
   assert.equal(validateReadOnlySql("select 'a;b' -- note\n;"), "select 'a;b'");
   assert.equal(validateReadOnlySql("select /* c */ 1"), "select   1");
