@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { STATE_ROOT, loadConfig } from "./config.js";
+import { refuseUnisolatedTestWrite } from "./atomic.js";
 
 const LOG_DIR = path.join(STATE_ROOT, "logs");
 const LOG = path.join(LOG_DIR, "audit.jsonl");
@@ -26,6 +27,12 @@ export function audit(event: string, detail: Record<string, unknown> = {}): void
   }
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
+    // Same refusal as writeFileAtomic, reached by the one write that does
+    // not go through it: a bare (un-isolated) test run must not append to
+    // the real audit log either. The catch below swallows the refusal —
+    // audit must never take EVE down — and that is fine: the point is that
+    // the line does not land in the real log.
+    refuseUnisolatedTestWrite(LOG);
     // Spread FIRST: a detail key named "event" or "ts" must never overwrite the
     // line's own label — the Factory files use detail.event as a sub-stage.
     fs.appendFileSync(LOG, JSON.stringify({ ...detail, ts: new Date().toISOString(), event }) + "\n");

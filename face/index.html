@@ -7,55 +7,51 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
-  }
-}
-</script>
 </head>
 <body>
-  <div id="bg-root"></div>
-  <div id="orb-root"></div>
-
-  <header id="hdr" class="glass">
-    <div class="wordmark">EVE<span class="wordmark-dot"></span></div>
-    <div class="hdr-right">
-      <button id="alertsBtn" class="ghost" title="Notices">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-        <span id="alertBadge" class="badge" hidden></span>
-      </button>
-      <button id="pauseBtn" class="ghost" title="Pause all proactive behavior">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
-      </button>
-      <span id="statusDot" class="status-dot idle" title="idle"></span>
+<div id="eve-app">
+  <header class="eve-top">
+    <div>
+      <div class="eve-brand">EVE<i aria-hidden="true"></i></div>
+      <div class="eve-meta"><b id="eve-state-label">Connecting</b><span id="eve-conn-meta">· mic off · proactivity on</span></div>
+    </div>
+    <div class="eve-tabs" role="tablist" aria-label="EVE states">
+      <button class="eve-tab" type="button" role="tab" aria-selected="true" data-state="quiet">Quiet</button>
+      <button class="eve-tab" type="button" role="tab" aria-selected="false" data-state="working">Working</button>
+      <button class="eve-tab" type="button" role="tab" aria-selected="false" data-state="review" id="eveTabReview">Review<span class="cnt" hidden></span></button>
+      <button class="eve-focus-toggle" id="eveFocusBtn" type="button" aria-pressed="true">Show rail</button>
+      <button class="eve-focus-toggle" id="evePauseBtn" type="button" aria-pressed="false" title="Pause all proactive behavior">Pause</button>
+      <a class="eve-brain" href="/mind" title="EVE's brain — memory, tools, knowledge">mind</a>
     </div>
   </header>
 
-  <aside id="panel" class="glass">
-    <button id="collapseBtn" class="ghost collapse-btn" title="Collapse">‹</button>
-    <div id="panelBody">
-      <section><h4>Notices <span class="count" id="cNotices">0</span></h4><div id="sNotices"></div></section>
-      <section><h4>Reminders <span class="count" id="cReminders">0</span></h4><div id="sReminders"></div></section>
-      <section><h4>Memory <span class="count" id="cFacts">0</span></h4><div id="sFacts"></div></section>
-      <section><h4>Usage today</h4><div id="sUsage" class="entry dim"></div></section>
-    </div>
-  </aside>
+  <main class="eve-layout orb-only" id="eve-layout">
+    <section class="eve-stage" aria-live="polite">
+      <div class="eve-kicker" id="eve-kicker">connecting / hello</div>
+      <div class="eve-stage-scroll">
+        <div id="eve-view"></div>
+        <div class="eve-orb-air" id="eve-orb-air"></div>
+      </div>
+      <form class="eve-prompt" id="eve-prompt" autocomplete="off">
+        <input class="eve-input" id="eve-input" aria-label="Talk to EVE" placeholder="Tell EVE what you need…" autocomplete="off" />
+        <button class="eve-mic" type="button" id="eveMic" aria-label="Talk to EVE" title="Talk to EVE">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg>
+        </button>
+        <button class="eve-send" type="submit" id="eveSend">Send</button>
+      </form>
+    </section>
 
-  <div id="cards"></div>
-  <div id="agent-labels" aria-hidden="true"></div>
+    <aside class="eve-side" aria-label="EVE's current work">
+      <section class="eve-side-section"><h2>Needs you · <span id="eveCNeeds">0</span></h2><div class="eve-work" id="eveSNeeds"></div></section>
+      <section class="eve-side-section"><h2>EVE is handling · <span id="eveCHandling">0</span></h2><div class="eve-work" id="eveSHandling"></div></section>
+      <section class="eve-side-section"><h2>Notices · <span id="eveCNotices">0</span></h2><div class="eve-work" id="eveSNotices"></div></section>
+      <section class="eve-side-section"><h2>Reminders · <span id="eveCRem">0</span></h2><div class="eve-work" id="eveSRem"></div></section>
+      <section class="eve-side-section"><h2>Sub-agents</h2><div class="eve-work" id="eveSAgents"></div></section>
+      <div class="eve-foot" id="eve-usage">usage · —</div>
+    </aside>
+  </main>
+</div>
 
-  <div id="micbar">
-    <button id="micBtn" aria-label="Talk to EVE">
-      <svg id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg>
-      <svg id="stopIcon" viewBox="0 0 24 24" fill="currentColor" hidden><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
-    </button>
-    <div class="hint">TAP OR SAY &ldquo;HEY EVE&rdquo;</div>
-  </div>
-
-  <script type="module" src="scene/main.js"></script>
-  <script type="module" src="shell.js"></script>
+<script type="module" src="shell.js"></script>
 </body>
 </html>

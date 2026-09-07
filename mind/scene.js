@@ -8,7 +8,7 @@ import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer
 
 import { fetchSkeleton, observe } from "./data.js";
 import { layoutAll, ANCHORS } from "./regions.js";
-import { uTime, buildRegionInstances, buildCore, buildStarfield, buildMembrane, radialTexture } from "./nodes.js";
+import { uTime, buildRegionInstances, buildCore, buildStarfield, buildDust, buildMembrane, radialTexture } from "./nodes.js";
 import { buildEdges, PulsePool, arc } from "./edges.js";
 
 const statsEl = document.getElementById("stats");
@@ -49,7 +49,11 @@ scene.background = new THREE.Color("#05070B");
 scene.fog = new THREE.FogExp2(0x05070b, 0.012);
 
 const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 400);
-camera.position.set(0, 7, 26);
+// Intro: arrive from further out and glide home over the first seconds. The
+// final position is unchanged, so every interaction afterwards starts from
+// exactly the framing the old hard cut used to land on.
+const HOME = new THREE.Vector3(0, 7, 26);
+camera.position.copy(HOME).multiplyScalar(1.7).add(new THREE.Vector3(0, 4, 0));
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -65,6 +69,7 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.
 composer.addPass(bloom);
 
 scene.add(buildStarfield());
+scene.add(buildDust()); // near-field motes — depth cue between sky and nodes
 const membrane = buildMembrane();
 scene.add(membrane);
 
@@ -130,6 +135,7 @@ for (const region of skeleton.regions) {
   chip.className = "chip";
   chip.innerHTML = `<span class="swatch"></span><span class="nm"></span> <span class="n"></span>`;
   chip.querySelector(".swatch").style.background = region.color;
+  chip.querySelector(".swatch").style.boxShadow = `0 0 8px ${region.color}`; // CSS currentColor can't see an inline background
   chip.querySelector(".nm").textContent = region.name;
   chip.querySelector(".n").textContent = count;
   chip.onclick = () => {
@@ -199,6 +205,28 @@ const frameTimes = [];
 let degraded = 0;
 let lowSince = 0;
 
+// ---------------------------------------------------------------- intro
+// Radial ease only — it composes cleanly with autoRotate, the idle drift and
+// the inspector's fly lerp, all of which also write camera.position. Any
+// pointer grab cancels it so a user mid-intro is never fought.
+const _introOff = new THREE.Vector3(); // scratch — the loop must not allocate
+const introStartAt = performance.now();
+const introFrom = camera.position.distanceTo(controls.target);
+const introTo = HOME.length();
+const INTRO_MS = 2800;
+let introActive = true;
+// Any real camera intent — grab or scroll — hands control straight back to
+// the user, and the exposure snaps to its final grade so no half-developed
+// frame is ever left stranded.
+const cancelIntro = () => {
+  if (!introActive) return;
+  introActive = false;
+  renderer.toneMappingExposure = 1.06;
+};
+export { cancelIntro };
+renderer.domElement.addEventListener("pointerdown", cancelIntro);
+renderer.domElement.addEventListener("wheel", cancelIntro, { passive: true });
+
 // ---------------------------------------------------------------- loop
 const clock = new THREE.Clock();
 let prevDrift = 0;
@@ -220,12 +248,31 @@ function frame() {
     prevDrift = Math.sin(t * 0.22) * 0.5;
   }
 
+  // Intro: shrink the orbit radius with a cubic ease-out while exposure
+  // develops like a photograph. Both are dead by INTRO_MS and were skipped
+  // entirely (introActive false) if the user grabbed the scene first.
+  if (introActive) {
+    const p = Math.min(1, (t0 - introStartAt) / INTRO_MS);
+    const e = 1 - Math.pow(1 - p, 3);
+    _introOff.copy(camera.position).sub(controls.target);
+    camera.position.copy(controls.target).addScaledVector(_introOff.normalize(), introFrom + (introTo - introFrom) * e);
+    renderer.toneMappingExposure = 1.06 * (0.25 + 0.75 * e);
+    if (p >= 1) {
+      introActive = false;
+      renderer.toneMappingExposure = 1.06; // land exactly on the old grade
+    }
+  }
+
   core.nucleus.rotation.y = t * 0.12;
   core.coronaTight.material.rotation = t * 0.25;
   core.coronaWide.material.rotation = -t * 0.15;
   core.stable.rotation.y = t * 0.22; // Y, not Z — Z is the torus symmetry axis
   core.dynamic.rotation.y = -t * 0.16;
   core.dynamic.material.opacity = 0.22 + 0.1 * Math.sin(t * 0.9);
+
+  // The wide fresnel shell breathes in counterphase with the tight one, so
+  // the core's atmosphere swells instead of blinking.
+  core.shellWide.material.uniforms.uOpacity.value = 0.32 + 0.1 * Math.sin(t * 0.6 + 1.5);
 
   if (coreFlare) {
     const e = Math.max(0, 1 - (t0 - coreFlare) / 1200);
@@ -236,7 +283,14 @@ function frame() {
   if (membraneFlare) {
     const e = Math.max(0, 1 - (t0 - membraneFlare) / 2000);
     membrane.material.uniforms.uOpacity.value = 0.06 + Math.sin(e * Math.PI) * 0.16;
-    if (e <= 0) membraneFlare = 0;
+    if (e <= 0) {
+      membraneFlare = 0;
+      membrane.material.uniforms.uOpacity.value = 0.06;
+    }
+  } else {
+    // Idle: the membrane breathes around its resting opacity so the edge of
+    // the world reads as a living boundary, not a fixed glass shell.
+    membrane.material.uniforms.uOpacity.value = 0.055 + 0.018 * Math.sin(t * 0.3);
   }
 
   if (degraded < 2 && simKeys.length && t0 > nextSpark) {

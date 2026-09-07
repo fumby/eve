@@ -56,7 +56,9 @@ const SHIMMER_MAT = () =>
       fragmentShader: `uniform float uTime; uniform float uOpacity; uniform vec3 uColor; uniform float uShimmer;
         varying float vPhase;
         void main(){
-          float s = 1.0 + uShimmer * 0.55 * sin(uTime * 1.6 + vPhase);
+          // Two incommensurate sines again: a single one sweeps a visible
+          // gradient along every edge in lockstep; two stay organic.
+          float s = 1.0 + uShimmer * (0.35 * sin(uTime * 1.6 + vPhase) + 0.25 * sin(uTime * 2.4 + vPhase * 1.7));
           gl_FragColor = vec4(uColor, uOpacity * s);
         }`,
     }),
@@ -89,7 +91,9 @@ const FLOW_MAT = (color, speed) =>
           float head = fract(uTime * uSpeed + vPhase);
           float d = fract(head - vT);
           float comet = exp(-d * 9.0) * uFlow;
-          vec3 col = mix(uColor, vec3(1.0), comet * 0.8);
+          // The comet's tail bleaches toward warm white at its hottest, so a
+          // pulse reads as a spark carrying light, not a tinted dot.
+          vec3 col = mix(uColor, vec3(1.0, 0.97, 0.92), comet * 0.85);
           gl_FragColor = vec4(col, (uOpacity * 0.75 + comet * 0.8) * (0.35 + 0.65 * vW));
         }`,
     }),

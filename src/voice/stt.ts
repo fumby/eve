@@ -4,6 +4,7 @@ import { loadConfig, requireKey } from "../core/config.js";
 import { memoriesAsFacts } from "../memory/store.js";
 import { coreKnowledge } from "../brain/prompt.js";
 import { loadReminders } from "../tools/reminders.js";
+import { audit } from "../core/audit.js";
 
 export class SttError extends Error {}
 
@@ -265,17 +266,48 @@ export async function transcribeScribe(wav: Buffer): Promise<Heard> {
   };
 }
 
+// The languages Umberto actually speaks to her — English and Italian. His
+// ask, 2026-09-07: "sometimes she thinks I'm speaking in Chinese or Russian."
+// Scribe's detector is confident and occasionally wrong on a short, noisy
+// clip, and a wrong language poisons the turn: the transcript comes back in
+// the wrong script and the model is told he spoke Russian. So a detection
+// outside this set is treated as a MIS-HEARING, never as a fact: the clip goes
+// to Deepgram's multi-language recogniser (ten languages, English and Italian
+// among them — it cannot answer in Chinese) and the language is reported as
+// unknown. Other people in the room speaking other languages still reach her
+// through the words themselves, not through this flag.
+export const EXPECTED_LANGUAGES: ReadonlySet<string> = new Set(["eng", "ita"]);
+export function isExpectedLanguage(code: string | null): boolean {
+  return code === null || EXPECTED_LANGUAGES.has(code);
+}
+
+// The two recognisers behind transcribeBest, injectable so the language rule
+// can be tested without the network (tests/stt-language.test.ts).
+export interface Recognisers {
+  scribe: (wav: Buffer) => Promise<Heard>;
+  deepgram: (wav: Buffer) => Promise<string>;
+}
+
 // The recognizer EVE actually uses. Scribe is the authority; the Deepgram
 // result already in hand (from the live caption socket) is the safety net, so
 // a flaky network degrades instead of losing the turn.
-export async function transcribeBest(wav: Buffer, deepgramFallback: string | null): Promise<Heard> {
+export async function transcribeBest(
+  wav: Buffer,
+  deepgramFallback: string | null,
+  recognisers: Recognisers = { scribe: transcribeScribe, deepgram: transcribe },
+): Promise<Heard> {
   try {
-    const heard = await transcribeScribe(wav);
-    if (heard.text) return heard;
+    const heard = await recognisers.scribe(wav);
+    if (heard.text && isExpectedLanguage(heard.language)) return heard;
+    if (heard.text) {
+      // Heard words, in a language he does not speak: a mis-detection. Logged
+      // so the rate is visible; the words themselves never leave this function.
+      audit("stt_language_rejected", { language: heard.language, chars: heard.text.length });
+    }
   } catch {
     // fall through to whatever Deepgram gave us
   }
-  const text = (deepgramFallback ?? "").trim() || (await transcribe(wav));
+  const text = (deepgramFallback ?? "").trim() || (await recognisers.deepgram(wav));
   return { text: fixName(text), language: null, confidence: 0, speakers: 1, source: "deepgram" };
 }
 

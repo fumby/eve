@@ -21,12 +21,18 @@ code, copied from the working tree, not a rewrite for display. What is not here:
 | `memory/`, `data/`, `logs/` | EVE's actual memory and my personal notes. Git-ignored in the original too. |
 | `brain/identity.md` | Her personality file — mine to write, and personal. A generic `brain/identity.example.md` is included. |
 | `brain/ledger-schema.md` | Describes my own finances. A generic `brain/ledger-schema.example.md` is included. |
-| `AGENT.md`, `docs/` | The internal spec, a security audit with open findings, and migration notes. |
+| `AGENT.md`, `docs/`, `SETUP-PENDING.md` | The internal spec, a security audit with open findings, migration notes, and the one-time logins only I can do. |
 | `design/.prism/brief.md` | Private positioning doc for the design agent. |
+| `config.allowed-hosts` | Names my own tailnet host. `config.allowed-hosts.example` shows the shape; an absent file means loopback only. |
 | `.env` | Keys. `.env.example` lists the names only. |
+| `desktop/quickbar/build/` | Compiled Swift binaries — build products. `build.sh` next to the sources rebuilds them. |
 
-A handful of file paths and one voice ID were replaced with placeholders. Nothing
-else was edited. `ARCHITECTURE.md` is the tour; this file is the summary.
+Placeholders stand in for a handful of real values: my home path (`/Users/YOU`),
+my tailnet hostname (`eve.tail1234.ts.net`), my ElevenLabs voice id, my two email
+addresses, my street address, and — in the ESSEC fixtures — the names, emails and
+timetable of real people at the school. `config.json` ships with its personal
+fields emptied: no voice id, no keyterms, no project paths. Nothing else was
+edited. `ARCHITECTURE.md` is the tour; this file is the summary.
 
 ---
 
@@ -34,14 +40,14 @@ else was edited. `ARCHITECTURE.md` is the tour; this file is the summary.
 
 | | |
 |---|---:|
-| TypeScript in `src/` | 14,566 lines |
-| Tests in `tests/` | 6,345 lines · 308 tests · 28 files |
-| Browser code (`face/`, `mind/`) | 4,857 lines |
-| Real-model check scripts (`scripts/`) | 1,763 lines |
-| Tools registered | 29 |
-| Runtime dependencies | 8 |
+| TypeScript in `src/` | 24,224 lines |
+| Tests in `tests/` | 10,967 lines · 507 tests · 56 files |
+| Browser code (`face/`, `mind/`) | 5,028 lines |
+| Real-model check scripts (`scripts/`) | 4,215 lines |
+| Tool definitions in `src/tools/` | 78 |
+| Runtime dependencies | 9 |
 
-`tsc --noEmit` is clean. `npm test` runs 308 tests. Copy the `.example` files first
+`tsc --noEmit` is clean. `npm test` runs 507 tests. Copy the `.example` files first
 (see **Running it**): three tests read the operator's own notes, and those templates
 stand in for them. Two further fixtures encode assumptions about the host they were
 written on — a non-root user, and a home directory more than one level below `/` —

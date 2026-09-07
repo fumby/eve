@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE</title>
+<link rel="stylesheet" href="/quickbar.css" />
+</head>
+<body>
+  <div id="wrap">
+    <div id="dot" class="idle" title="idle"></div>
+    <div id="thread">
+      <div id="heard"></div>
+      <div id="reply"></div>
+    </div>
+    <form id="bar" autocomplete="off">
+      <input id="input" type="text" placeholder="Dettà con Glaido (Fn+Ctrl) o scrivi…" autocomplete="off" autofocus />
+    </form>
+  </div>
+  <script>
+// QuickBar — la barra rapida di EVE. Finestra piccola (aperta via scorciatoia
+// macOS in app-mode), stesso server, stesso cervello: Enter invia un chat
+// turn, la risposta appare qui e EVE la pronuncia (audio dal server via
+// speak_segment → riprodotto qui con AudioContext).
+//
+// Glaido: l'utente preme il suo hotkey (Fn+Ctrl-sinistra), Glaido detta e
+// "scrive" nel campo con focus — che è sempre questo input, aperto da poco.
+// Nessun bridge necessario: Glaido fa quello che fa in ogni app.
+
+const $ = (id) => document.getElementById(id);
+const dot = $("dot"), heard = $("heard"), reply = $("reply"),
+      form = $("bar"), input = $("input");
+
+let ws = null;
+let state = "idle";
+let audioCtx = null;
+const pendingSegs = new Map(); // seq → url
+
+function setState(s) {
+  state = s;
+  dot.className = s;
+  dot.title = s;
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/`);
+  ws.onopen = () => { setState("idle"); };
+  ws.onclose = () => { setState("offline"); setTimeout(connect, 2000); };
+  ws.onerror = () => { setState("offline"); };
+  ws.onmessage = (ev) => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    switch (m.type) {
+      case "state":
+        // Le fasi del turno: listening non ci riguarda (Glaido detta), ma
+        // processing/speaking si riflettono nel pallino.
+        if (m.state === "processing") setState("processing");
+        else if (m.state === "speaking") setState("speaking");
+        else if (m.state === "idle" && state !== "offline") setState("idle");
+        break;
+      case "chat_turn":
+        heard.textContent = m.text;
+        reply.textContent = "";
+        setState("processing");
+        break;
+      case "chat_queued":
+        // Follow-up mentre lavora: in coda, lo prende appena finisce.
+        reply.textContent = `⏳ queued · ${m.text}`;
+        break;
+      case "chat_delta":
+        reply.textContent += m.text;
+        break;
+      case "chat_done":
+        setState(m.spoke ? "speaking" : "idle");
+        break;
+      case "speak_segment": {
+        // L'audio di EVE: fetch del segmento e riproduzione. La QuickBar è
+        // una finestra piccola ma ha bisogno dell'AudioContext sbloccato:
+        // il submit è un user gesture, lo usiamo per il priming.
+        fetch(`/tts/${encodeURIComponent(m.segId)}`)
+          .then((r) => r.arrayBuffer())
+          .then((b) => {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            return audioCtx.decodeAudioData(b);
+          })
+          .then((buf) => {
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start();
+          })
+          .catch(() => {});
+        break;
+      }
+      case "turn_done":
+        setState("idle");
+        break;
+      case "turn_error":
+        reply.textContent = `(hiccup) ${m.message}`;
+        setState("error");
+        break;
+      case "confirm_request":
+        // Il gate Tier 6: se EVE chiede il permesso, la barra lo mostra con
+        // Allow/Refuse — stessa logica della faccia, dimensione barra.
+        showConfirm(m.id, m.intent);
+        break;
+      case "confirm_resolved":
+        const c = document.querySelector(`[data-confirm="${m.id}"]`);
+        if (c) c.remove();
+        break;
+    }
+  };
+}
+
+function showConfirm(id, intent) {
+  const card = document.createElement("div");
+  card.className = "confirm";
+  card.dataset.confirm = id;
+  card.innerHTML =
+    `<div class="intent"></div><div class="btns"><button class="allow">Allow</button><button class="deny">Refuse</button></div>`;
+  card.querySelector(".intent").textContent = intent;
+  const send = (ok) => { ws.send(JSON.stringify({ type: "confirm_response", id, ok })); card.remove(); };
+  card.querySelector(".allow").onclick = () => send(true);
+  card.querySelector(".deny").onclick = () => send(false);
+  document.body.appendChild(card);
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== 1) return;
+  input.value = "";
+  // Priming dell'audio: questo submit è il gesture che sblocca AudioContext
+  // (la voce di EVE deve poter partire subito, non a metà frase).
+  if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch {} }
+  heard.textContent = text; // feedback immediato: cosa è stato inviato
+  reply.textContent = "";
+  ws.send(JSON.stringify({ type: "chat", text }));
+  setState("processing");
+});
+
+// Esc chiude la barra (la finestra app-mode si chiude con Cmd+W comunque).
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { input.blur(); heard.textContent = ""; reply.textContent = ""; }
+});
+
+// Focus sempre nel campo: Glaido scrive dove c'è focus, e il campo è qui.
+addEventListener("focus", () => input.focus());
+input.focus();
+connect();
+  </script>
+</body>
+</html>

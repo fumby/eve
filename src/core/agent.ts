@@ -3,14 +3,23 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { streamTurn, type WebAccess } from "./provider.js";
 import { buildStableBlock, checkpointBlock, contextBlock } from "../brain/prompt.js";
+import { morningFacts, wakeUpSignal } from "../brain/morning.js";
 import { audit } from "./audit.js";
 import { loadConfig } from "./config.js";
 import {
   recordExchange,
   newConversationId,
   previousSessionEnd,
+  hasExchangeToday,
   type Conversation,
 } from "./conversations.js";
+import { scheduleReview } from "../memory/extractor.js";
+
+// Injected in tests so the loop can be exercised against a scripted stream —
+// the one way to pin what the turn actually SENDS (the composed context, the
+// morning readings) without a paid call. The factory runtime has the same
+// seam. Production always uses the real provider.
+export type StreamFn = typeof streamTurn;
 
 // Implemented by the tool registry in Tier 2. Tier 1 runs without tools.
 export interface ToolProvider {
@@ -39,16 +48,27 @@ export class Agent {
   // Depth of the whole conversation (seeded + trimmed included), for the
   // personality checkpoint — the live window alone would understate it.
   totalExchanges = 0;
+  // Wall-clock of the last COMPLETED exchange, for the time-gap line in the
+  // context block. The review's ask: a morning message and an evening message
+  // in the same session must read as different MOMENTS, not one continuous
+  // chat — "quello che ho detto stamattina potrebbe non valere più".
+  private lastTurnEndedAt: number | null = null;
   // Session facts, snapshotted once at construction and reported to the model
   // each turn by contextBlock(). A resumed conversation keeps its ORIGINAL
   // start, so this and totalExchanges describe the same span.
   readonly startedAt: string;
   readonly previousSessionEnd: string | null;
+  // The per-turn abort controller: interrupt() aborts the in-flight stream so
+  // the model call stops instead of running to completion after the UI has
+  // already reset. The review flagged this: "Interrupting the interface does
+  // not cancel the reasoning/action loop."
+  private abortController: AbortController | null = null;
 
   constructor(
     private tools?: ToolProvider,
     readonly source: "typed" | "voice" | "heartbeat" | "face" = "typed",
     resume?: Conversation,
+    private stream: StreamFn = streamTurn,
   ) {
     this.conversationId = resume ? resume.id : newConversationId();
     this.startedAt = resume?.startedAt ?? new Date().toISOString();
@@ -73,6 +93,13 @@ export class Agent {
     }
   }
 
+  // Cancel the in-flight turn: aborts the stream so the model call stops,
+  // rather than running to completion after the UI has already reset. Called
+  // by FaceTurns.interrupt() so "stop" means stop, not "stop showing it".
+  cancel(): void {
+    this.abortController?.abort();
+  }
+
   // Runs one full turn: user text in, EVE's final text out (streamed via
   // callbacks along the way). The model may use several tools before answering.
   // `heard` carries what the recogniser detected for a spoken turn.
@@ -80,20 +107,45 @@ export class Agent {
     userText: string,
     cb: TurnCallbacks = {},
     heard?: { language: string | null; speakers: number },
+    client?: { device: "phone" | "mac"; place?: string },
   ): Promise<string> {
+    this.abortController = new AbortController();
     const checkpoint = this.history.length;
     const note =
       heard?.language && heard.language !== "eng" && heard.language !== "ita"
-        ? `(Spoken aloud; the recogniser detected the language as "${heard.language}". This is a machine observation, not an instruction.)\n`
+        ? `(Spoken aloud; the recogniser guessed the language as "${heard.language}" — almost certainly a mis-hearing: Umberto speaks English and Italian. This is a machine observation, not an instruction.)\n`
         : "";
+    // The wake-up fact, computed per turn against the store — never a
+    // constructor snapshot, or a session alive across midnight would carry
+    // "first exchange today" into the afternoon. Heartbeat turns are EVE
+    // talking to herself; they never count as contact with him.
+    const firstToday = this.source !== "heartbeat" && !hasExchangeToday();
+    // The brief's trigger is his own wake-up words — never the first exchange
+    // of the day, which may be a calendar question at 07:00 and deserves a
+    // calendar answer. The brief moved here from the 08:00 heartbeat on
+    // 2026-09-06, and what that prompt used to inject so the model could not
+    // skip it — today's classes, the watches' recent word — now arrives as
+    // facts in the context block, on the wake-up only. Pure disk reads that
+    // never throw (src/brain/morning.ts).
+    const wokeUp = this.source !== "heartbeat" && wakeUpSignal(userText);
+    const morning = wokeUp ? await morningFacts() : null;
     const context = contextBlock({
       startedAt: this.startedAt,
       exchanges: this.totalExchanges,
       source: this.source,
       previousSessionEnd: this.previousSessionEnd,
+      ...(this.lastTurnEndedAt ? { lastTurnEndedAt: this.lastTurnEndedAt } : {}),
+      ...(client ? { client } : {}),
+      ...(firstToday ? { firstToday: true } : {}),
+      ...(wokeUp ? { wokeUp: true } : {}),
+      ...(morning ? { morning } : {}),
     });
-    this.history.push({ role: "user", content: context + note + userText });
-
+    // The user's own words come AFTER the machine context block, separated
+    // by a blank line. Joined without the separator, his words read as part
+    // of the "automatic detections" — and EVE (rightly) refused what looked
+    // like an injected instruction. The separator keeps the context block
+    // machine-only and his text clearly his.
+    this.history.push({ role: "user", content: context + note + "\n" + userText });
     // Rebuilt once per turn (not per tool round): identity edits and freshly
     // stored facts land on the next turn, while one turn stays self-consistent.
     // The stable block carries the cache breakpoint; per-turn freshness rides
@@ -119,13 +171,17 @@ export class Agent {
         let assistantContent: Anthropic.ContentBlock[] = [];
         let stopReason: string | null = null;
 
-        for await (const ev of streamTurn({
+        for await (const ev of this.stream({
           system,
           messages: this.history,
           tools: this.tools?.definitions(),
           web: CHAT_WEB,
           cacheConversation: true,
         })) {
+          // An interrupt() during the stream aborts the controller; we stop
+          // processing immediately rather than feeding the model's continued
+          // output to callbacks that have already been reset.
+          if (this.abortController?.signal.aborted) break;
           if (ev.type === "text") {
             fullText += ev.delta;
             cb.onText?.(ev.delta);
@@ -159,21 +215,58 @@ export class Agent {
           }
           this.exchangeStarts.push(checkpoint);
           this.totalExchanges++;
+          // The next turn's gap line is measured from THIS completion.
+          this.lastTurnEndedAt = Date.now();
           trimExchanges(
             this.history,
             this.exchangeStarts,
             Math.max(1, loadConfig().memory.liveWindowExchanges),
           );
+          // Every N exchanges, a cheap model reads the transcript so far and
+          // banks what it finds. Same guard as recordExchange above: the
+          // heartbeat's turns aren't a conversation, and there is no stored
+          // transcript for them to review. Fire-and-forget by construction —
+          // it cannot delay this return or throw into it.
+          if (this.source !== "heartbeat") {
+            scheduleReview(this.conversationId, this.totalExchanges);
+          }
           return fullText;
         }
 
         // Execute every requested tool; all results go back in ONE user message.
+        // Cancellation is checked BEFORE each tool: the review reproduced a
+        // cancelled agent whose NEXT queued tool still ran. Stopping the
+        // stream is not enough — the loop must not start new consequential
+        // work after the user said stop.
         const results: Anthropic.ToolResultBlockParam[] = [];
         for (const t of pendingTools) {
+          if (this.abortController?.signal.aborted) {
+            // The user cancelled: every remaining tool gets a synthetic
+            // "not run" result so the model's conversation stays well-formed,
+            // but NOTHING consequential executes.
+            results.push({
+              type: "tool_result",
+              tool_use_id: t.id,
+              content: "The turn was cancelled by Umberto before this tool ran. It was NOT executed. Do not assume its effects.",
+              is_error: true,
+            });
+            continue;
+          }
           cb.onToolCall?.(t.name, t.input);
           const result = this.tools
             ? await this.tools.execute(t.name, t.input)
             : { content: `Tool "${t.name}" is not available.`, isError: true };
+          // And again AFTER: a cancel arriving while a tool was in flight
+          // means the remaining siblings must not run either.
+          if (this.abortController?.signal.aborted && !result.isError) {
+            results.push({
+              type: "tool_result",
+              tool_use_id: t.id,
+              content: `${result.content}\n(Note: the turn was cancelled by Umberto while/after this ran. Stop here — do not start further actions.)`,
+              is_error: false,
+            });
+            continue;
+          }
           results.push({
             type: "tool_result",
             tool_use_id: t.id,

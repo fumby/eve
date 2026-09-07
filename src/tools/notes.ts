@@ -61,7 +61,7 @@ export const noteTools: EveTool[] = [
   {
     name: "search_notes",
     description:
-      "Search Umberto's study materials (business administration notes) for a word or phrase. Matches file names and file contents; returns matching files with a short snippet. Use this before answering questions about his notes or courses.",
+      "Search Umberto's study workspace (~/ESSEC — his ESSEC Global BBA course folders, notes and review schedule) for a word or phrase. Matches file names and file contents; returns matching files with a short snippet. Use this before answering questions about his notes or courses.",
     schema: z.object({
       query: z.string().min(2).describe("Word or phrase to look for, e.g. 'break-even analysis'"),
     }),
@@ -121,7 +121,7 @@ export const noteTools: EveTool[] = [
     description:
       "Set which folder on the machine EVE runs on holds Umberto's study materials. This changes a setting, so it requires his explicit confirmation. Use when he tells you where his notes live.",
     schema: z.object({
-      dir: z.string().min(1).describe("Absolute path to the folder, e.g. /Users/you/Documents/Uni on the Mac, /home/eve/studies on the server"),
+      dir: z.string().min(1).describe("Absolute path to the folder, e.g. /Users/YOU/Documents/Uni on the Mac, /home/eve/studies on the server"),
     }),
     needsConfirmation: true,
     run: async (input) => {

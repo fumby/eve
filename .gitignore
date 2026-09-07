@@ -42,3 +42,13 @@ __pycache__/
 # Editor/backup copies of .env carry the same secrets
 .env.*
 !.env.example
+
+# EVE Ears: the compiled helper is a build product; the bundle lives under
+# desktop/dist (already ignored)
+/desktop/ears/build/
+# The QuickBar's compiled Swift binaries are build products too
+/desktop/quickbar/build/
+
+# The operator's own host allowlist, made by copying the .example next to it.
+# The template ships; the real one — which names a private tailnet — never does.
+/config.allowed-hosts

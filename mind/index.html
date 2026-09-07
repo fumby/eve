@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<meta name="theme-color" content="#05070B" />
 <title>EVE · Mind</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -21,10 +23,39 @@
   <div id="labels"></div>
 
   <header id="hdr">
+    <a id="backBtn" class="ghost" href="/" title="Back to EVE — the face" aria-label="Back to EVE">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      <span class="lbl">EVE</span>
+    </a>
     <div class="brand">EVE<span class="dot"></span><span class="sub">mind</span></div>
-    <input id="search" type="search" placeholder="search memories, tools, files…" autocomplete="off" />
+    <div class="searchwrap">
+      <input id="search" type="search" placeholder="search memories, tools, files…" autocomplete="off" />
+      <span id="searchMeta" hidden></span>
+    </div>
     <div id="stats" class="stats">loading…</div>
+    <button id="resetBtn" class="ghost" title="Reset view (R)" aria-label="Reset view">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>
+    </button>
+    <button id="helpBtn" class="ghost" title="Controls" aria-label="Controls" aria-expanded="false" aria-controls="help">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+    </button>
   </header>
+
+  <div id="hud">
+    <nav id="crumb" hidden aria-label="Focus trail"></nav>
+    <div id="help" hidden>
+    <div class="help-title">controls</div>
+    <div class="help-row"><span class="k">drag</span><span class="v">orbit around the mind</span></div>
+    <div class="help-row"><span class="k">scroll · pinch</span><span class="v">zoom in and out</span></div>
+    <div class="help-row"><span class="k">hover a node</span><span class="v">light up its connections</span></div>
+    <div class="help-row"><span class="k">click a node</span><span class="v">fly in and inspect it</span></div>
+    <div class="help-row"><span class="k"><kbd>R</kbd> · dbl-click</span><span class="v">reset the view</span></div>
+    <div class="help-row"><span class="k">search · <kbd>Enter</kbd></span><span class="v">jump to a match; Enter cycles the rest</span></div>
+    <div class="help-row"><span class="k">region chips</span><span class="v">show or hide a region</span></div>
+    <div class="help-row"><span class="k"><kbd>Esc</kbd></span><span class="v">close this and the inspector</span></div>
+    <div class="help-foot">the URL always points at the node you're focused on — copy it to share a deep link.</div>
+    </div>
+  </div>
 
   <div id="legend"></div>
   <div id="tooltip" hidden></div>

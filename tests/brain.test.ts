@@ -103,8 +103,12 @@ test("capabilities render from the given tools; checkpoint block is what it says
   const block = buildStableBlock([{ name: "test_tool", description: "Does the thing. And more." }]);
   assert.match(block, /What you can do/);
   assert.match(block, /- test_tool: Does the thing\./);
+  assert.match(block, /Calendar:.*get_calendar/);
+  assert.match(block, /Email:.*Mail\.app/);
+  assert.match(block, /Messages:.*iMessage/);
+  assert.match(block, /Vision:.*Gemini/);
+  assert.match(block, /Self-improvement:/);
   assert.match(block, /gated IN CODE/);
-  assert.match(block, /no email, calendar, or messaging access/);
   assert.match(checkpointBlock(), /long-conversation check/i);
 });
 

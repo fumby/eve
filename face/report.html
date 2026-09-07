@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE · Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --accent: #2dd4a8;
+  --bg: #05070b;
+  --card: rgba(16, 18, 26, 0.85);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #fff;
+  --dim: rgba(255, 255, 255, 0.55);
+  --purple: #7c6fe0;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+body { padding: 28px 20px 60px; display: flex; flex-direction: column; align-items: center; }
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(45, 212, 168, 0.07), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 20% 100%, rgba(124, 111, 224, 0.05), transparent 70%);
+}
+.wrap { max-width: 780px; width: 100%; }
+header { margin-bottom: 22px; }
+h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+h1 .dot { color: var(--accent); }
+.question { margin-top: 6px; color: var(--dim); font-size: 13.5px; }
+.updated { margin-top: 4px; font-size: 11px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.verdict {
+  background: linear-gradient(135deg, rgba(45,212,168,0.10), rgba(124,111,224,0.08));
+  border: 1px solid rgba(45, 212, 168, 0.25);
+  border-radius: 16px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+.verdict h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 8px; }
+.verdict p { font-size: 15.5px; line-height: 1.55; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+.method {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 60ms backwards;
+}
+.method h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--purple); margin-bottom: 8px; }
+.method p { font-size: 13.5px; line-height: 1.5; color: rgba(255,255,255,0.8); }
+
+h2.picks-h {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--dim); margin: 18px 0 12px;
+}
+
+#picks { display: flex; flex-direction: column; gap: 14px; }
+.pick {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 10px;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+  transition: border-color 0.25s;
+}
+.pick:hover { border-color: rgba(45, 212, 168, 0.35); }
+.pick .rankline { display: flex; align-items: center; gap: 10px; }
+.rank {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(45, 212, 168, 0.12); color: var(--accent);
+  font: 700 14px "Inter", system-ui;
+  flex: none;
+}
+.pick.gold .rank { background: rgba(240, 195, 107, 0.15); color: #f0c36b; }
+.pick h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.subtitle { font-size: 13px; color: var(--dim); line-height: 1.4; margin-top: -6px; }
+.why {
+  font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.78);
+  padding: 10px 12px; border-radius: 10px;
+  background: rgba(45, 212, 168, 0.06);
+  border: 1px solid rgba(45, 212, 168, 0.14);
+}
+.why b { color: var(--accent); font-weight: 600; }
+.evidence h4, .caveats h4 { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 6px; }
+.evidence ul, .caveats ul { list-style: none; }
+.evidence li, .caveats li { font-size: 12.5px; color: rgba(255,255,255,0.72); line-height: 1.5; padding-left: 16px; position: relative; margin-bottom: 4px; }
+.evidence li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); }
+.caveats li::before { content: "⚠"; position: absolute; left: 0; color: #f0c36b; }
+.caveats li, .caveats { color: rgba(240, 195, 107, 0.85); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  font-size: 10.5px; padding: 3px 9px; border-radius: 20px;
+  background: rgba(255,255,255,0.06); color: var(--dim);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+a.open-link {
+  display: block; text-align: center; text-decoration: none;
+  padding: 10px 0; border-radius: 11px;
+  background: var(--accent); color: #06231b;
+  font: 600 13.5px "Inter", system-ui;
+  transition: filter 0.2s, transform 0.15s;
+}
+a.open-link:hover { filter: brightness(1.1); }
+a.open-link:active { transform: scale(0.98); }
+
+#sections { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+section.sec { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+section.sec h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+section.sec p { font-size: 13.5px; line-height: 1.6; color: rgba(255,255,255,0.8); white-space: pre-wrap; }
+
+.report-caveats {
+  margin-top: 18px; padding: 14px 16px; border-radius: 12px;
+  background: rgba(240, 195, 107, 0.06);
+  border: 1px solid rgba(240, 195, 107, 0.18);
+  font-size: 13px; line-height: 1.55; color: rgba(240, 195, 107, 0.9);
+}
+.report-caveats b { color: #f0c36b; }
+
+#sources { margin-top: 18px; }
+#sources h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); margin-bottom: 10px; }
+.src { display: block; font-size: 12.5px; color: var(--dim); line-height: 1.7; text-decoration: none; }
+.src:hover { color: var(--accent); }
+.src::before { content: "↗ "; color: var(--accent); }
+
+.empty { text-align: center; color: var(--dim); padding: 60px 0; font-size: 15px; }
+.empty .orb {
+  width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(45,212,168,0.9), rgba(45,212,168,0.15) 60%, transparent);
+  box-shadow: 0 0 40px rgba(45, 212, 168, 0.3);
+  animation: breathe 3s ease-in-out infinite;
+}
+@keyframes breathe { 50% { opacity: 0.6; transform: scale(0.94); } }
+
+footer { margin-top: 30px; color: rgba(255,255,255,0.25); font-size: 12px; }
+
+@media (max-width: 640px) {
+  body { padding: 20px 14px 40px; }
+  h1 { font-size: 21px; }
+  .pick { padding: 15px; }
+  .verdict { padding: 15px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>EVE<span class="dot">·</span>report</h1>
+    <p class="question" id="question"></p>
+    <p class="updated" id="updated"></p>
+  </header>
+  <div id="content"><div class="empty"><div class="orb"></div>No report yet — ask EVE to research something.</div></div>
+  <footer>Every claim in this report carries its source. Reports are composed by deep_research and stay at /report.</footer>
+</div>
+<script>
+// /report — where deep research lands. Reads data/report-window.json via
+// /api/report (light polling: a new report replaces the old one without a
+// manual refresh, same UX as /options).
+let seenAt = null;
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/report", { cache: "no-store" });
+    if (!r.ok) throw new Error();
+    const w = await r.json();
+    if (!w || !w.openedAt || w.openedAt === seenAt) return;
+    seenAt = w.openedAt;
+    document.getElementById("question").textContent = w.question ?? "";
+    document.getElementById("updated").textContent =
+      w.openedAt ? new Date(w.openedAt).toLocaleString() : "";
+    const host = document.getElementById("content");
+    host.replaceChildren();
+    if (!w.title && !(w.picks ?? []).length && !(w.sections ?? []).length) {
+      host.innerHTML = '<div class="empty"><div class="orb"></div>No report yet — ask EVE to research something.</div>';
+      return;
+    }
+    render(host, w);
+  } catch {
+    document.getElementById("content").innerHTML =
+      '<div class="empty">Can\'t reach EVE\'s server.</div>';
+  }
+}
+
+function render(host, w) {
+  const verdict = document.createElement("div");
+  verdict.className = "verdict";
+  verdict.innerHTML = `<h2>The verdict</h2><p>${escapeHtml(w.verdict ?? "")}</p>`;
+  host.appendChild(verdict);
+
+  if (w.method) {
+    const m = document.createElement("div");
+    m.className = "method";
+    m.innerHTML = `<h2>How “best” was judged</h2><p>${escapeHtml(w.method)}</p>`;
+    host.appendChild(m);
+  }
+
+  if ((w.picks ?? []).length) {
+    const h = document.createElement("h2");
+    h.className = "picks-h";
+    h.textContent = `The picks — ranked`;
+    host.appendChild(h);
+    const picks = document.createElement("div");
+    picks.id = "picks";
+    w.picks.forEach((p, i) => picks.appendChild(pick(p, i)));
+    host.appendChild(picks);
+  }
+
+  if ((w.sections ?? []).length) {
+    const secs = document.createElement("div");
+    secs.id = "sections";
+    w.sections.forEach((s) => {
+      const el = document.createElement("section");
+      el.className = "sec";
+      el.innerHTML = `<h3>${escapeHtml(s.heading)}</h3><p>${escapeHtml(s.body)}</p>`;
+      secs.appendChild(el);
+    });
+    host.appendChild(secs);
+  }
+
+  if (w.caveats) {
+    const c = document.createElement("div");
+    c.className = "report-caveats";
+    c.innerHTML = `<b>What this report could not establish:</b> ${escapeHtml(w.caveats)}`;
+    host.appendChild(c);
+  }
+
+  if ((w.sources ?? []).length) {
+    const s = document.createElement("div");
+    s.id = "sources";
+    s.innerHTML = "<h2>Sources — check them yourself</h2>" +
+      w.sources.map((x) =>
+        `<a class="src" href="${escapeHtml(x.url)}" target="_blank" rel="noopener">${escapeHtml(x.label)}</a>`
+      ).join("");
+    host.appendChild(s);
+  }
+}
+
+function pick(p, i) {
+  const el = document.createElement("div");
+  el.className = "pick" + (p.rank === 1 ? " gold" : "");
+  el.style.animationDelay = `${(i + 2) * 60}ms`;
+  const evidence = (p.evidence ?? []).length
+    ? `<div class="evidence"><h4>Evidence</h4><ul>${p.evidence.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></div>`
+    : "";
+  const caveats = p.caveats
+    ? `<div class="caveats"><h4>Caveats</h4><ul><li>${escapeHtml(p.caveats)}</li></ul></div>`
+    : "";
+  const meta = (p.meta ?? []).length
+    ? `<div class="meta">${p.meta.map((t) => `<span class="tag">${escapeHtml(t)}</span>`).join("")}</div>`
+    : "";
+  const link = p.url
+    ? `<a class="open-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">Open · Contact</a>`
+    : "";
+  el.innerHTML = `
+    <div class="rankline"><span class="rank">${escapeHtml(String(p.rank ?? i + 1))}</span><h3>${escapeHtml(p.title)}</h3></div>
+    ${p.subtitle ? `<p class="subtitle">${escapeHtml(p.subtitle)}</p>` : ""}
+    ${p.why ? `<div class="why"><b>Why this ranks here:</b> ${escapeHtml(p.why)}</div>` : ""}
+    ${evidence}${caveats}${meta}${link}`;
+  return el;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

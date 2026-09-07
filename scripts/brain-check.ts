@@ -108,18 +108,9 @@ async function phase2(): Promise<void> {
 // exists only in memory/core/ — no tools to reach for, nothing said this
 // session, so a right answer can only come from the always-loaded block.
 async function phase3(): Promise<void> {
-  // The expected answer lives in memory/core/, which is personal and not in
-  // this repo — so the fact to probe for is supplied by the operator rather
-  // than hardcoded here. Set both to something only memory/core/ knows.
-  const question = process.env.EVE_CORE_PROBE_QUESTION ?? "What's my email address? Reply with just the address.";
-  const expected = process.env.EVE_CORE_PROBE_ANSWER;
-  if (!expected) {
-    console.log("⏭  Phase 3 skipped: set EVE_CORE_PROBE_ANSWER (and optionally EVE_CORE_PROBE_QUESTION).");
-    return;
-  }
   const agent = new Agent(undefined, "typed");
-  const reply = await agent.runTurn(question);
-  if (!reply.toLowerCase().includes(expected.toLowerCase()))
+  const reply = await agent.runTurn("What's my email address? Reply with just the address.");
+  if (!/you@example\.com/i.test(reply))
     fail(`core knowledge missing — she said: ${reply.slice(0, 120)}`);
   console.log("✅ Phase 3: core knowledge answered cold, no tools, never mentioned this session.");
 }

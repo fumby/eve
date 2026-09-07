@@ -11,10 +11,20 @@ import { loadConfig, requireKey } from "../core/config.js";
 export class TtsError extends Error {}
 
 // What looks fine on screen ("22–29°C") makes TTS stumble or read symbol
-// names aloud. Everything here is turned into words before synthesis, in the
-// language of the sentence — EVE switches between Italian and English.
+// names aloud. Everything here is turned into words before synthesis, in
+// the language of the sentence — EVE switches between Italian and English.
 const IT_HINT =
   /\b(il|lo|la|le|gli|di|del|della|che|per|con|non|sono|alle|una|uno|gradi|domani|oggi|sole|ricordami|ciao)\b/gi;
+
+// The language a sentence is in. This is what made bilingual voice routing
+// possible (an Italian-native voice reading English sounded distorted — the
+// complaint that produced the split). Since 2026-09-06 Umberto runs ONE voice
+// (Bella) on eleven_v3 for both languages and the routing sleeps until
+// voice.englishVoiceId is ever configured again; speechify still uses the
+// same detection to normalize text per language.
+export function detectLanguage(text: string): "it" | "en" {
+  return (text.match(IT_HINT) ?? []).length >= 2 ? "it" : "en";
+}
 
 export function speechify(text: string): string {
   const italian = (text.match(IT_HINT) ?? []).length >= 2;
@@ -91,15 +101,30 @@ export class SentenceAssembler {
 export async function synthesize(rawText: string): Promise<Buffer> {
   const cfg = loadConfig();
   const text = speechify(rawText);
+  const lang = detectLanguage(text);
+  // Bilingual voice routing: born when Umberto's own voice (Italian-native,
+  // generated) carried a strong non-native accent in English — Italian
+  // sentences used his voice on the fast flash model, English sentences the
+  // configured native-English voice on multilingual. Since 2026-09-06 he
+  // moved BOTH languages to one voice (Bella on eleven_v3, his pick after an
+  // A/B against five others) and no englishVoiceId is configured, so the
+  // routing is dormant: every sentence takes voiceId on ttsModel. The split
+  // reactivates untouched if englishVoiceId is ever set again.
+  const voiceId =
+    lang === "en" && cfg.voice.englishVoiceId ? cfg.voice.englishVoiceId : cfg.voice.voiceId;
+  const body =
+    lang === "en" && cfg.voice.englishVoiceId
+      ? { text, model_id: "eleven_multilingual_v2", language_code: "en" }
+      : { text, model_id: cfg.voice.ttsModel };
   const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${cfg.voice.voiceId}?output_format=mp3_44100_128`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
     {
       method: "POST",
       headers: {
         "xi-api-key": requireKey("ELEVENLABS_API_KEY"),
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text, model_id: cfg.voice.ttsModel }),
+      body: JSON.stringify(body),
       // Hang-proofing: a dead connection becomes a visible "voice hiccup"
       // instead of a turn stuck in "speaking" forever.
       signal: AbortSignal.timeout(20_000),

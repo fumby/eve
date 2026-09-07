@@ -24,6 +24,14 @@ export interface EveTool {
   // shouldn't be persisted in plaintext. Omit it and both default to the tool
   // name plus its JSON arguments, as before.
   confirmIntent?(input: Record<string, unknown>): { human: string; log: string };
+  // A standing yes, given IN CODE, for exactly one shape of this tool's input:
+  // return the reason it is pre-approved (audited verbatim), or null to ask as
+  // usual. Honoured only on a registry with a confirm hook — where Umberto
+  // could have been asked — never on the heartbeat's confirm-less one, and
+  // never when config.confirmOverrides forces the gate on. There is one (his
+  // wake-up song, src/tools/music.ts). Adding another is a gate change:
+  // surface it separately, per CLAUDE.md.
+  standingApproval?(input: Record<string, unknown>): string | null;
   // May the Factory hand this tool to agents it spawns? Absent = derived:
   // confirmation-gated tools and anything secrets/settings/spend-adjacent are
   // withheld by default; everything else is offered. Set explicitly to opt
@@ -83,25 +91,47 @@ export class Registry implements ToolProvider {
 
   async execute(name: string, input: unknown): Promise<{ content: string; isError: boolean }> {
     const tool = this.tools.get(name);
-    if (!tool) return { content: `No tool named "${name}" exists.`, isError: true };
+    if (!tool) {
+      // Audited like every other refusal below: on 2026-09-06 the face had
+      // already announced a tool step the user could see, the call bounced
+      // here, and the audit trail recorded nothing — a visible step that
+      // the log insisted never happened.
+      audit("tool_rejected", { tool: name, reason: "no such tool" });
+      return { content: `No tool named "${name}" exists.`, isError: true };
+    }
 
     const parsed = tool.schema.safeParse(input ?? {});
     if (!parsed.success) {
       const problems = parsed.error.issues
         .map((i) => `${i.path.join(".") || "(input)"}: ${i.message}`)
         .join("; ");
+      // Same as above: the model asked for a tool, the face may have shown
+      // the step, and the bounce is a real event in the trail. Before this
+      // line, a validation failure left the log silent between the model's
+      // usage line and whatever came next — invisible exactly when the
+      // trail is needed to explain a dead turn.
+      audit("tool_rejected", { tool: name, reason: problems.slice(0, 300) });
       return { content: `Invalid input for ${name} — ${problems}`, isError: true };
     }
 
     // ── THE GATE ─────────────────────────────────────────────────────────
     // Consequential tools stop here until Umberto says yes. Per-action:
     // one yes covers exactly one call, never the next. config.confirmOverrides
-    // can flip a tool's flag without touching code.
+    // can flip a tool's flag without touching code — but NEVER to DISABLE a
+    // gate that should be on. A tool whose needsConfirmation is true (or a
+    // function) can only be made MORE cautious, never less, via overrides.
+    // This is the security invariant: a hand-edit to config.json cannot
+    // disarm the Tier 6 gate. It can only ADD a gate where none was.
     const flagged =
       typeof tool.needsConfirmation === "function"
         ? tool.needsConfirmation(parsed.data)
         : tool.needsConfirmation;
-    const needsConfirmation = loadConfig().confirmOverrides[name] ?? flagged;
+    const override = loadConfig().confirmOverrides[name];
+    // An override can only TURN ON the gate, never off. If the tool is
+    // flagged by code, no config edit can unflag it — only add a gate
+    // where the code didn't. `override === false` is IGNORED for a
+    // flagged tool; the code's flag is authoritative.
+    const needsConfirmation = override === true ? true : override === false && !flagged ? false : Boolean(flagged);
     if (needsConfirmation) {
       // Two renderings, because they go to different places. `intent` is read by
       // a human on his own screen and may carry the content he is judging;
@@ -125,14 +155,22 @@ export class Registry implements ToolProvider {
           isError: true,
         };
       }
-      const ok = await this.confirm(name, intent);
-      audit("gate", { tool: name, intent: logIntent, decision: ok ? "approved" : "declined" });
-      if (!ok) {
-        return {
-          content:
-            "Umberto declined (or didn't answer in time), so this was NOT done. Don't retry unless he asks again.",
-          isError: true,
-        };
+      // A standing yes skips the ask — only HERE, past the no-human check
+      // above, and only when the file is not forcing the gate on (override
+      // === true): config may add caution, never remove it.
+      const standing = override === true ? null : (tool.standingApproval?.(parsed.data) ?? null);
+      if (standing) {
+        audit("gate", { tool: name, intent: logIntent, decision: `approved (standing: ${standing})` });
+      } else {
+        const ok = await this.confirm(name, intent);
+        audit("gate", { tool: name, intent: logIntent, decision: ok ? "approved" : "declined" });
+        if (!ok) {
+          return {
+            content:
+              "Umberto declined (or didn't answer in time), so this was NOT done. Don't retry unless he asks again.",
+            isError: true,
+          };
+        }
       }
     }
     // ─────────────────────────────────────────────────────────────────────

@@ -4,9 +4,9 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { WebSocketServer, WebSocket } from "ws";
-import { loadEnv, loadConfig, setHeartbeatPaused, ROOT, STATE_ROOT } from "../core/config.js";
+import { loadEnv, loadConfig, setHeartbeatPaused, ROOT, STATE_ROOT, isProductionState } from "../core/config.js";
 import { Registry } from "../core/registry.js";
 import { reminderTools, loadReminders } from "../tools/reminders.js";
 import { loadConversations, getConversation } from "../core/conversations.js";
@@ -16,9 +16,12 @@ import { nodeDetail } from "../mind/detail.js";
 import { noteTools } from "../tools/notes.js";
 import { projectTools } from "../tools/projects.js";
 import { memoryTools } from "../tools/memory.js";
+import { skillTools } from "../tools/skills.js";
+import { conversationTools } from "../tools/conversations.js";
 import { listMemories, memoriesAsFacts } from "../memory/store.js";
 import { weatherTools } from "../tools/weather.js";
 import { researchTools } from "../tools/research.js";
+import { reportTools } from "../tools/report.js";
 import { perplexityTools } from "../tools/perplexity.js";
 import { boardTools } from "../tools/board.js";
 import { ledgerTools } from "../tools/ledger.js";
@@ -27,11 +30,35 @@ import { listNotices, dismissNotice } from "../core/notices.js";
 import { usageToday, audit, onAuditEvent } from "../core/audit.js";
 import { warmTts } from "../voice/tts.js";
 import { FaceTurns } from "./turns.js";
-import { sameOrigin } from "./origin.js";
+import { sameOrigin, isAllowedHost } from "./origin.js";
 import { PREVIEW_MIME, handlePreviewRequest } from "../design/routes.js";
 import { resolveProjectRoot } from "../design/docs.js";
 import { designTools, setDesignNoticeSink } from "../design/tools.js";
+import { calendarTools } from "../tools/calendar.js";
+import { visionTools } from "../tools/vision.js";
+import { mailTools } from "../tools/mail.js";
+import { messageTools } from "../tools/messages.js";
+import { ledgerWriteTools } from "../tools/ledger-write.js";
+import { phoneTools } from "../tools/phone.js";
+import { delegateTools } from "../tools/delegate.js";
+import { webOrderTools } from "../tools/web-order.js";
+import { claudeChromeTools } from "../tools/claude-chrome.js";
+import { webTools } from "../tools/web.js";
+import { homekitTools } from "../tools/homekit.js";
+import { shellTools } from "../tools/shell.js";
+import { calcTools } from "../tools/calc.js";
+import { musicTools } from "../tools/music.js";
+import { calendarWriteTools } from "../tools/calendar-write.js";
+import { commitmentTools } from "../tools/commitments.js";
+import { decisionTools } from "../tools/decisions.js";
+import { meetingPrepTools } from "../tools/meeting-prep.js";
+import { foodTools } from "../tools/food.js";
+import { modelTools } from "../tools/models.js";
+import { mailWriteTools } from "../tools/mail-write.js";
 import { onDesignEvent } from "../design/dispatch.js";
+import { standingCheckTools } from "../tools/standing-checks.js";
+import { essecTools } from "../tools/essec.js";
+import { onUiWindow } from "../core/ui-bus.js";
 import { onAgentEvent } from "../core/agent-events.js";
 import { agentRoster } from "./roster.js";
 import type { ClientMsg, ServerMsg, Snapshot, FactoryPending } from "./protocol.js";
@@ -47,7 +74,7 @@ const FACE_DIR = path.join(ROOT, "face");
 const watchers: ReturnType<typeof installWatcher>[] = [];
 function buildRegistry(): Registry {
   const r = new Registry();
-  for (const t of [...reminderTools, ...noteTools, ...projectTools, ...memoryTools, ...weatherTools, ...researchTools, ...perplexityTools, ...boardTools, ...ledgerTools, ...designTools]) r.register(t);
+  for (const t of [...reminderTools, ...noteTools, ...projectTools, ...memoryTools, ...skillTools, ...conversationTools, ...weatherTools, ...researchTools, ...reportTools, ...perplexityTools, ...boardTools, ...ledgerTools, ...designTools, ...calendarTools, ...mailTools, ...messageTools, ...ledgerWriteTools, ...phoneTools, ...delegateTools, ...claudeChromeTools, ...webOrderTools, ...webTools, ...shellTools, ...homekitTools, ...musicTools, ...visionTools, ...calendarWriteTools, ...commitmentTools, ...decisionTools, ...meetingPrepTools, ...foodTools, ...modelTools, ...mailWriteTools, ...standingCheckTools, ...essecTools, ...calcTools]) r.register(t);
   // The Factory's own tools, plus every approved spawned agent as a
   // dispatch_to_<slug> tool — loaded now, refreshed live by the watcher.
   for (const t of factoryTools(r)) r.register(t);
@@ -76,6 +103,9 @@ function factoryPending(): FactoryPending[] {
 
 // ---------------------------------------------------------------- broadcast
 const clients = new Set<WebSocket>();
+// Per-socket client identity: what device (and roughly where) this tab is.
+// Set by the client_info message; cleaned up with the socket below.
+const clientInfo = new Map<WebSocket, { device: "phone" | "mac"; place?: string }>();
 // Whoever last picked up the mic owns the audio for that turn.
 let activeClient: WebSocket | null = null;
 
@@ -151,12 +181,50 @@ const resolveRoot = (slug: string): string | null => {
 };
 
 const server = http.createServer((req, res) => {
+  // Gate 0: the Host must be allowlisted, before any route is touched.
+  // The audit's finding 3: this handler did no check at all. For plain HTTP
+  // the browser's same-origin policy usually hides responses from foreign
+  // pages — but DNS rebinding defeats exactly that: after a rebind the
+  // attacker's origin IS this host, and the page reads /api/memory and every
+  // static file as if local. The allowlist is the one thing a rebind cannot
+  // forge, same anchor as the WebSocket check.
+  if (!isAllowedHost(req.headers.host) && !isAllowedHost(req.headers["x-forwarded-host"])) {
+    res.writeHead(403, { "Content-Type": "text/plain" });
+    res.end("forbidden host");
+    return;
+  }
   const pathname = new URL(req.url ?? "/", "http://x").pathname;
 
   // ---- design previews ----------------------------------------------
   if (handlePreviewRequest(req, res, { resolveRoot, pathname })) return;
 
   // ---- the mind map -------------------------------------------------
+  if (pathname === "/api/memory") {
+    void (async () => {
+      try {
+        const memories = listMemories().map((m) => ({
+          name: m.name,
+          type: m.type,
+          hook: m.hook,
+          created: m.created,
+          source: m.source ?? null,
+          confirmed: m.confirmed ?? false,
+          verified: m.verified ?? null,
+          body: m.body,
+        }));
+        const retired = listMemories({ includeRetired: true })
+          .filter((m) => m.supersededBy)
+          .map((m) => ({ name: m.name, hook: m.hook, replacedBy: m.supersededBy, on: m.supersededOn }));
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ memories, retired, count: memories.length }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    })();
+    return;
+  }
+
   if (pathname === "/api/mind-map") {
     void (async () => {
       try {
@@ -224,6 +292,63 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // QuickBar: la barra rapida — stessa pagina di asset, HTML dedicato con
+  // route propria perché è una finestra app-mode diversa dalla faccia.
+  if (pathname === "/quickbar" || pathname === "/quickbar/") {
+    const qb = path.join(FACE_DIR, "quickbar.html");
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, must-revalidate" });
+    res.end(fs.readFileSync(qb));
+    return;
+  }
+
+  // Options window: la finestra delle opzioni (cibo, spesa, viaggi…).
+  // La pagina è statica; il CONTENUTO arriva da /api/options che legge il
+  // payload che il tool open_options_window ha scritto.
+  if (pathname === "/options" || pathname === "/options/") {
+    const op = path.join(FACE_DIR, "options.html");
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, must-revalidate" });
+    res.end(fs.readFileSync(op));
+    return;
+  }
+  if (pathname === "/api/options") {
+    void (async () => {
+      try {
+        const { readJson } = await import("../core/store.js");
+        const w = readJson<Record<string, unknown> | null>("options-window.json", null);
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify(w ?? { openedAt: null, title: "", intro: "", options: [] }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    })();
+    return;
+  }
+
+  // Report window: where deep research LANDS — same pattern as /options.
+  // The page is static; the content arrives from /api/report reading the
+  // payload the open_report_window tool wrote.
+  if (pathname === "/report" || pathname === "/report/") {
+    const rp = path.join(FACE_DIR, "report.html");
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store, must-revalidate" });
+    res.end(fs.readFileSync(rp));
+    return;
+  }
+  if (pathname === "/api/report") {
+    void (async () => {
+      try {
+        const { readJson } = await import("../core/store.js");
+        const w = readJson<Record<string, unknown> | null>("report-window.json", null);
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+        res.end(JSON.stringify(w ?? { openedAt: null }));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    })();
+    return;
+  }
+
   const rel = pathname === "/" ? "index.html" : pathname.slice(1);
   const file = path.resolve(FACE_DIR, rel);
   if (!file.startsWith(FACE_DIR + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -279,6 +404,20 @@ wss.on("connection", (ws) => {
         dismissNotice(msg.noticeId);
         void snapshot().then((s) => send({ type: "snapshot", snapshot: s }));
         break;
+      case "chat":
+        activeClient = ws;
+        void turns.textTurn(String(msg.text), { client: clientInfo.get(ws) });
+        break;
+      // One per connection: what the client is and roughly where. Stored
+      // per-socket so every turn from this tab carries it; gone when the
+      // socket dies. No place is reported until the user grants geolocation
+      // in the browser — absent means unknown, never a default city.
+      case "client_info":
+        clientInfo.set(ws, {
+          device: msg.device === "phone" ? "phone" : "mac",
+          ...(typeof msg.place === "string" && msg.place ? { place: msg.place } : {}),
+        });
+        break;
       case "set_paused":
         setHeartbeatPaused(msg.paused);
         audit("kill_switch", { paused: msg.paused, via: "face" });
@@ -308,6 +447,7 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     clients.delete(ws);
+    clientInfo.delete(ws);
     if (activeClient === ws) activeClient = null;
     // Last tab gone = the session is over as far as Umberto is concerned:
     // run the memory extractor on what was said. Guarded inside against
@@ -454,6 +594,32 @@ heartbeat.start();
 // Background design dispatches narrate themselves to every open tab, and
 // their completion notice is pushed the moment it lands (not on next snapshot).
 onDesignEvent((event) => send({ type: "design_event", event }));
+// A tool opened a browsable window (the food options, a report). Exactly ONE
+// delivery, decided HERE — the only place that knows who is talking:
+//   phone client → open_url, the page navigates itself (a Mac-side `open`
+//                  can never reach a phone browser)
+//   mac client   → a real `open` in his browser, where the tab is closable.
+//                  Never open_url on the Mac: the face's own window — inside
+//                  EVE.app, a WKWebView with no back button — would navigate
+//                  away to /options and strand him there. The tab, not the
+//                  face, is the window that can close.
+// `open` only on production state: a sandboxed check would pop a browser tab
+// showing a fake window mid-run. The event carries a same-origin path, built
+// here, never taken from the tool verbatim.
+onUiWindow((ev) => {
+  const target = ev.path.startsWith("/") ? ev.path : "/" + ev.path;
+  const device = activeClient ? clientInfo.get(activeClient)?.device : undefined;
+  if (device === "phone") {
+    if (activeClient && activeClient.readyState === WebSocket.OPEN) {
+      activeClient.send(JSON.stringify({ type: "open_url", url: target }));
+    }
+    return;
+  }
+  if (isProductionState()) {
+    const base = `http://127.0.0.1:${PORT}`;
+    execFile("open", [base + target], () => {});
+  }
+});
 // Sub-agent activity → the constellation (board seats, researcher, head of design).
 onAgentEvent((e) =>
   send({

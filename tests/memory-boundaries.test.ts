@@ -56,13 +56,35 @@ test("the boundary scan actually reads the source tree", () => {
 });
 
 // The other invariant that rests on nothing but care: confirmedByHuman is the
-// one documented way past the credential filter in saveMemory(), and it is
-// legitimate ONLY because the confirmation gate already asked Umberto. It is a
-// separate argument precisely so no model-authored tool-call JSON can reach it —
-// but nothing stops a future caller from simply hardcoding it true. This makes
-// "exactly one call site, and it computes the same predicate the gate opens on"
-// a checked fact rather than a convention.
-test("confirmedByHuman is only ever passed from the gated memory tools", () => {
+// one documented way past the credential filter — in saveMemory(), and now in
+// saveSkill(), which shares the same filter — and it is legitimate ONLY because
+// the confirmation gate already asked Umberto. It is a separate argument
+// precisely so no model-authored tool-call JSON can reach it — but nothing stops
+// a future caller from simply hardcoding it true. This makes "only in a file
+// that OWNS a gate, and computed from the same predicate that gate opens on" a
+// checked fact rather than a convention.
+//
+// Two files, not one, since skills arrived. They are listed with the predicate
+// each must use rather than allowed as a set of paths: a stray `true` in a file
+// that happens to be on the list is the failure this test exists to catch, and
+// the pairing is what keeps the list from becoming a hole. That the named
+// predicate really is the gate's is checked behaviourally next door — see
+// tests/memory-sensitive.test.ts and tests/skills.test.ts, which assert the
+// gate fires on exactly the content the store refuses.
+const GATED_WRITERS: { file: string; predicate: RegExp; label: string }[] = [
+  {
+    file: path.join("src", "tools", "memory.ts"),
+    predicate: /confirmedByHuman:\s*sensitiveForSave\(/,
+    label: "sensitiveForSave()",
+  },
+  {
+    file: path.join("src", "tools", "skills.ts"),
+    predicate: /confirmedByHuman:\s*sensitiveSkill\(/,
+    label: "sensitiveSkill()",
+  },
+];
+
+test("confirmedByHuman is only ever passed from a tool that owns a gate", () => {
   const assignments: { file: string; line: number; text: string }[] = [];
   for (const file of sourceFiles(SRC)) {
     const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -77,31 +99,34 @@ test("confirmedByHuman is only ever passed from the gated memory tools", () => {
     }
   }
 
-  const TOOLS = path.join("src", "tools", "memory.ts");
   const where = assignments.map((a) => `  ${a.file}:${a.line} — ${a.text}`).join("\n");
+  const allowed = new Map(GATED_WRITERS.map((w) => [w.file, w]));
 
   assert.ok(assignments.length > 0, "confirmedByHuman has no call sites — did it get renamed?");
 
-  const strays = assignments.filter((a) => a.file !== TOOLS);
+  const strays = assignments.filter((a) => !allowed.has(a.file));
   assert.deepEqual(
     strays.map((a) => `${a.file}:${a.line}`),
     [],
-    `confirmedByHuman is passed from outside ${TOOLS}:\n${where}\n\n` +
-      `It is the only way past the credential filter in saveMemory(), and it is\n` +
-      `sound ONLY where the confirmation gate has already asked Umberto. Those\n` +
-      `tools are where the gate is; anywhere else the claim is simply untrue.\n` +
-      `Route the new caller through save_memory or update_memory instead.`,
+    `confirmedByHuman is passed from outside the gated tools:\n${where}\n\n` +
+      `It is the only way past the credential filter in saveMemory()/saveSkill(),\n` +
+      `and it is sound ONLY where the confirmation gate has already asked Umberto.\n` +
+      `Those tools are where the gate is; anywhere else the claim is simply untrue.\n` +
+      `Allowed: ${GATED_WRITERS.map((w) => w.file).join(", ")}.\n` +
+      `Route the new caller through save_memory / save_skill instead.`,
   );
 
-  for (const a of assignments)
+  for (const a of assignments) {
+    const rule = allowed.get(a.file)!;
     assert.match(
       a.text,
-      /confirmedByHuman:\s*sensitiveForSave\(/,
-      `confirmedByHuman must be computed from sensitiveForSave() — the SAME predicate\n` +
-        `that decides whether the gate opens. A literal true (or any other condition)\n` +
-        `would claim Umberto approved something he was never asked about.\n` +
+      rule.predicate,
+      `confirmedByHuman must be computed from ${rule.label} — the SAME predicate\n` +
+        `that decides whether ${a.file}'s gate opens. A literal true (or any other\n` +
+        `condition) would claim Umberto approved something he was never asked about.\n` +
         `Found at ${a.file}:${a.line}: ${a.text}`,
     );
+  }
 });
 
 test("no executable code anywhere writes to memory/core/ or brain/identity.md", () => {

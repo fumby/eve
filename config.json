@@ -1,10 +1,15 @@
 {
-  "model": "claude-sonnet-5",
-  "effort": "low",
-  "maxTokens": 2048,
+  "model": "claude-opus-5",
+  "fallbacks": [
+    {
+      "model": "claude-sonnet-5"
+    }
+  ],
+  "effort": "xhigh",
+  "maxTokens": 32768,
   "voice": {
     "voiceId": "",
-    "ttsModel": "eleven_flash_v2_5"
+    "ttsModel": "eleven_v3"
   },
   "stt": {
     "model": "nova-3",
@@ -37,17 +42,28 @@
         "loudness": "loud"
       },
       {
-        "name": "daily-briefing",
-        "kind": "daily_briefing",
-        "at": "08:00",
-        "intervalMinutes": 1440,
-        "loudness": "loud"
-      },
-      {
         "name": "board-review",
         "kind": "board_review",
         "intervalMinutes": 43200,
         "loudness": "loud"
+      },
+      {
+        "name": "self-review",
+        "kind": "self_review",
+        "intervalMinutes": 10080,
+        "loudness": "quiet"
+      },
+      {
+        "name": "memory-hygiene",
+        "kind": "memory_hygiene",
+        "intervalMinutes": 10080,
+        "loudness": "quiet"
+      },
+      {
+        "name": "waiting-for-review",
+        "kind": "waiting_for_review",
+        "intervalMinutes": 720,
+        "loudness": "quiet"
       },
       {
         "name": "repo-watch",
@@ -59,8 +75,8 @@
   },
   "confirmOverrides": {},
   "pricing": {
-    "inputPerMTok": 3,
-    "outputPerMTok": 15
+    "inputPerMTok": 5,
+    "outputPerMTok": 25
   },
   "face": {
     "port": 3939
@@ -76,7 +92,9 @@
     "resumeWindowMinutes": 45,
     "liveWindowExchanges": 30,
     "checkpointAfterExchanges": 12,
-    "extractorModel": "claude-haiku-4-5-20251001"
+    "extractorModel": "claude-haiku-4-5-20251001",
+    "confirmSupersede": false,
+    "reviewEveryExchanges": 10
   },
   "embeddings": {
     "model": "voyage-4-large"
@@ -108,5 +126,11 @@
     "dailyCap": 5,
     "maxRevisions": 3,
     "model": "claude-sonnet-5"
+  },
+  "privacy": {
+    "guardAddresses": [
+      "1 Rue Exemple",
+      "1 rue Exemple, Cergy"
+    ]
   }
 }

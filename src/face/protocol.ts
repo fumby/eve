@@ -21,6 +21,15 @@ export type ClientMsg =
   | { type: "dismiss"; noticeId: string }
   | { type: "set_paused"; paused: boolean }
   | { type: "refresh" }
+  | { type: "chat"; text: string }
+  // Server → client: open this path on the CLIENT (e.g. the options window
+  // on the phone, which the Mac-side `open` command can never reach).
+  | { type: "open_url"; url: string }
+  // The client states what it is and roughly where it is, once per
+  // connection. Device shapes the reply (short on a phone); place anchors
+  // local answers (food, weather) to the right city. Server stores it
+  // per-connection and rides it into every turn's context block.
+  | { type: "client_info"; device: "phone" | "mac"; place?: string }
   // The Factory's approval gate, from the face card.
   | { type: "factory_approve"; taskId: string }
   | { type: "factory_reject"; taskId: string; feedback: string | null };
@@ -74,6 +83,13 @@ export type ServerMsg =
   | { type: "speak_segment"; baseTurnId: string; segId: string; seq: number }
   | { type: "turn_done"; baseTurnId: string }
   | { type: "turn_error"; message: string }
+  | { type: "chat_turn"; turnId: string; text: string }
+  // A message sent while she was mid-turn: queued, not lost. It becomes a
+  // real turn (chat_turn/chat_delta/…) the moment the live one lands. The
+  // face shows it in the workspace as "queued · position N".
+  | { type: "chat_queued"; text: string; position: number }
+  | { type: "chat_delta"; turnId: string; text: string }
+  | { type: "chat_done"; turnId: string; spoke: boolean }
   | {
       type: "latency";
       transcriptMs: number | null;

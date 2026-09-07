@@ -62,8 +62,10 @@ export class MicCapture {
 
 const LEAD_IN = 0.06; // small cushion so the first buffer is never scheduled late
 
-// Level maths shared by both analysers. Kept in sync with face/scene/levels.js
-// (the pure, tested versions) — duplicated here so audio.js stays standalone.
+// Level maths shared by both analysers. Duplicated here so audio.js stays
+// standalone (the scene modules it kept in sync with are gone — the face now
+// renders the handoff orb; the pure level maths lives only here and in the
+// server's voice pipeline).
 function rmsLoud(bytes, gain = 3.2) {
   let sum = 0;
   for (let i = 0; i < bytes.length; i++) {
@@ -259,6 +261,14 @@ export class SegmentPlayer {
     this.base = null;
     this.turnDone = false;
     this.nextStart = 0;
+    // A finished turn is the moment to FORGIVE a fallback. Element mode was
+    // sticky forever, and element playback has an audible break/click at the
+    // start of every sentence (encoder padding + pipeline restart). One failed
+    // fetch (an expired segment, a server restart mid-turn) used to condemn
+    // the whole session to that. Reset to "pending" so the next turn re-primes
+    // Web Audio; if the browser really can't do it, it falls back again — but
+    // a transient failure no longer poisons every reply after it.
+    if (this.mode === "element") this.mode = "pending";
     if (wasActive) this.onDone();
   }
 

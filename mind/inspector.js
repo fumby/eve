@@ -1,7 +1,8 @@
 // Interaction: hover, click-to-fly, the detail panel, search, deep links.
 import * as THREE from "three";
-import { ctx } from "./scene.js";
+import { ctx, cancelIntro } from "./scene.js";
 import { fetchNode } from "./data.js";
+import { ANCHORS } from "./regions.js";
 
 const { scene, camera, controls, renderer, skeleton, positions, nodeById, instancedMeshes, edgeGroups, curves } = ctx;
 
@@ -9,6 +10,23 @@ const tooltip = document.getElementById("tooltip");
 const inspector = document.getElementById("inspector");
 const inspectorBody = document.getElementById("inspectorBody");
 const searchInput = document.getElementById("search");
+const searchMeta = document.getElementById("searchMeta");
+const searchWrap = document.querySelector(".searchwrap");
+const crumb = document.getElementById("crumb");
+const help = document.getElementById("help");
+const helpBtn = document.getElementById("helpBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+// The header wraps to two rows on small screens, so everything anchored below
+// it follows its measured height instead of the 54px desktop assumption. Measured
+// once at init and on resize — never per frame.
+const hdr = document.getElementById("hdr");
+function syncHeaderHeight() {
+  document.documentElement.style.setProperty("--hdr-h", `${hdr.offsetHeight}px`);
+}
+syncHeaderHeight();
+addEventListener("resize", syncHeaderHeight);
+if (document.fonts) document.fonts.ready.then(syncHeaderHeight).catch(() => {});
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -129,17 +147,50 @@ renderer.domElement.addEventListener("pointerup", (e) => {
   if (id) focusNode(id);
 });
 
-renderer.domElement.addEventListener("dblclick", () => {
+renderer.domElement.addEventListener("dblclick", resetView);
+
+// One shared home gesture — the header button, the R key and dbl-click all
+// land in exactly the same place, so none of the three can drift apart.
+function resetView() {
+  cancelIntro(); // a reset mid-intro would fight the intro's radial write
   flyTarget = { pos: new THREE.Vector3(0, 7, 26), target: new THREE.Vector3(0, 0, 0) };
   controls.autoRotate = true;
-  inspector.hidden = true;
+  closeInspector();
+  // Going home means leaving the node: drop the deep link too, so a reload
+  // after a reset starts from home instead of snapping back to the old node.
+  if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+}
+
+resetBtn.onclick = resetView;
+
+// ---------------------------------------------------------------- help card
+function setHelpOpen(open) {
+  help.hidden = !open;
+  helpBtn.classList.toggle("active", open);
+  helpBtn.setAttribute("aria-expanded", String(open));
+}
+helpBtn.onclick = () => setHelpOpen(help.hidden);
+// Clicking anywhere else folds the card away — it's a popover, not a panel.
+document.addEventListener("pointerdown", (e) => {
+  if (help.hidden) return;
+  if (help.contains(e.target) || helpBtn.contains(e.target)) return;
+  setHelpOpen(false);
 });
 
 addEventListener("keydown", (e) => {
+  // Modifier-held keys are browser shortcuts (Cmd+R reload) — never ours.
+  const plain = !e.metaKey && !e.ctrlKey && !e.altKey;
   if (e.key === "Escape") {
-    inspector.hidden = true;
+    setHelpOpen(false);
+    closeInspector();
     clearHighlight();
+  } else if (plain && (e.key === "r" || e.key === "R")) {
+    resetView();
+  } else if (plain && e.key === "?") {
+    setHelpOpen(help.hidden);
   }
+  // Typing never reaches here: the search field stops propagation on keydown,
+  // so R and ? can't fire while the user is mid-query.
 });
 
 // ---------------------------------------------------------------- focus
@@ -151,7 +202,91 @@ export function focusNode(id) {
   flyTarget = { pos: target.clone().add(dir.multiplyScalar(5.5)), target };
   controls.autoRotate = false;
   history.replaceState(null, "", `#node=${encodeURIComponent(id)}`);
+  pushCrumb(id);
+  document.body.classList.add("inspecting");
   void openInspector(id);
+}
+
+// Every path that hides the inspector (Esc, ×, reset) funnels through here so
+// the crumb position and the body class can never disagree with the panel.
+// The hash is untouched: hiding the panel is not leaving the node — the camera
+// is still focused, and the deep link should keep pointing at it.
+function closeInspector() {
+  inspector.hidden = true;
+  document.body.classList.remove("inspecting");
+}
+
+// ---------------------------------------------------------------- crumb
+// A short trail of where focus has been. Region first (with a jump back to its
+// anchor), node second, then the label of the node actually focused — each
+// link is a deep link, so the trail doubles as a path to re-walk.
+let crumbNodes = []; // [id, ...] — most recent first, capped
+const CRUMB_MAX = 4;
+
+function pushCrumb(id) {
+  crumbNodes = [id, ...crumbNodes.filter((x) => x !== id)].slice(0, CRUMB_MAX);
+  renderCrumb(id);
+}
+
+function regionOf(id) {
+  return nodeById.get(id)?.region ?? null;
+}
+
+function labelOf(id) {
+  return nodeById.get(id)?.label ?? id;
+}
+
+function renderCrumb(currentId) {
+  crumb.replaceChildren();
+  const region = regionOf(currentId);
+  if (region) {
+    const a = document.createElement("a");
+    a.href = "#";
+    a.textContent = region;
+    a.title = `jump to the ${region} region`;
+    a.onclick = (e) => {
+      e.preventDefault();
+      const anchor = ANCHORS[region] ?? [0, 0, 0];
+      flyTarget = { pos: new THREE.Vector3(anchor[0], anchor[1] + 6, anchor[2] + 11), target: new THREE.Vector3(...anchor) };
+      controls.autoRotate = false;
+    };
+    crumb.append(a);
+  }
+  // crumbNodes is newest-first internally; displayed reversed so the trail
+  // reads chronologically left to right and ends on the current node.
+  const trail = [...crumbNodes].reverse();
+  for (const id of trail) {
+    const sep = document.createElement("span");
+    sep.className = "sep";
+    sep.textContent = "›";
+    crumb.append(sep);
+    const a = document.createElement("a");
+    a.href = `#node=${encodeURIComponent(id)}`;
+    a.textContent = labelOf(id);
+    a.title = labelOf(id);
+    if (id === currentId) a.className = "now";
+    a.onclick = (e) => {
+      // The trail and the URL update together — both go through focusNode —
+      // so they can never diverge.
+      if (positions.has(id)) {
+        e.preventDefault();
+        focusNode(id);
+      }
+    };
+    crumb.append(a);
+  }
+  const x = document.createElement("button");
+  x.className = "x";
+  x.type = "button";
+  x.textContent = "×";
+  x.title = "Clear the trail";
+  x.setAttribute("aria-label", "Clear the focus trail");
+  x.onclick = () => {
+    crumbNodes = [];
+    crumb.hidden = true;
+  };
+  crumb.append(x);
+  crumb.hidden = false;
 }
 
 async function openInspector(id) {
@@ -218,16 +353,20 @@ async function openInspector(id) {
 }
 
 document.getElementById("closeInspector").onclick = () => {
-  inspector.hidden = true;
+  closeInspector();
 };
 
 // ---------------------------------------------------------------- search
-searchInput.addEventListener("keydown", (e) => {
-  e.stopPropagation(); // typing must never drive the scene
-  if (e.key !== "Enter") return;
-  const q = searchInput.value.trim().toLowerCase();
-  if (!q) return;
-  const ranked = skeleton.nodes
+// Live result count while typing, Enter jumps to the first match, and each
+// further Enter cycles to the next. The ranked order is the same as before —
+// prefix matches win, then the shortest label — so muscle memory holds.
+let searchResults = [];
+let searchIndex = -1;
+let lastQuery = "";
+let searchStepped = false; // false until the first Enter — typing always re-arms the top match
+
+function runSearch(q) {
+  return skeleton.nodes
     .map((n) => {
       const hay = `${n.label} ${n.id}`.toLowerCase();
       const i = hay.indexOf(q);
@@ -236,7 +375,61 @@ searchInput.addEventListener("keydown", (e) => {
     })
     .filter(Boolean)
     .sort((a, b) => a.score - b.score);
-  if (ranked[0]) focusNode(ranked[0].n.id);
+}
+
+function updateSearchMeta() {
+  const q = searchInput.value.trim().toLowerCase();
+  if (!q) {
+    searchMeta.hidden = true;
+    searchMeta.classList.remove("none");
+    searchWrap.classList.remove("has-meta");
+    searchResults = [];
+    searchIndex = -1;
+    lastQuery = "";
+    return;
+  }
+  // Only re-rank when the query changed — arrow keys and focus moves must not
+  // shift the match set out from under the user. A new query also re-arms the
+  // pager so its first Enter lands on the top match, not the second.
+  if (q !== lastQuery) {
+    searchResults = runSearch(q);
+    searchIndex = searchResults.length ? 0 : -1;
+    lastQuery = q;
+    searchStepped = false;
+  }
+  searchMeta.hidden = false;
+  searchWrap.classList.add("has-meta");
+  if (!searchResults.length) {
+    searchMeta.classList.add("none");
+    searchMeta.textContent = "no match";
+    return;
+  }
+  searchMeta.classList.remove("none");
+  if (searchResults.length === 1) {
+    searchMeta.textContent = "1 match";
+    return;
+  }
+  // current/total — the count doubles as the affordance for Enter cycling.
+  searchMeta.replaceChildren();
+  const b = document.createElement("b");
+  b.textContent = `${searchIndex + 1}/${searchResults.length}`;
+  searchMeta.append(b);
+}
+
+searchInput.addEventListener("input", updateSearchMeta);
+searchInput.addEventListener("focus", updateSearchMeta);
+searchInput.addEventListener("keydown", (e) => {
+  e.stopPropagation(); // typing must never drive the scene
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  updateSearchMeta(); // re-rank first if the user typed then Enter'd without an input event (e.g. paste + Enter)
+  if (!searchResults.length) return;
+  // First Enter lands on the top match; every later Enter advances and wraps.
+  // Same first-hit behaviour as the old code, now with a visible pager.
+  if (searchStepped) searchIndex = (searchIndex + 1) % searchResults.length;
+  searchStepped = true;
+  focusNode(searchResults[searchIndex].n.id);
+  updateSearchMeta();
 });
 
 // ---------------------------------------------------------------- fly loop

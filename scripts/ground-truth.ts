@@ -18,6 +18,8 @@ import { reminderTools } from "../src/tools/reminders.js";
 import { noteTools } from "../src/tools/notes.js";
 import { projectTools } from "../src/tools/projects.js";
 import { memoryTools } from "../src/tools/memory.js";
+import { skillTools } from "../src/tools/skills.js";
+import { conversationTools } from "../src/tools/conversations.js";
 import { weatherTools } from "../src/tools/weather.js";
 import { researchTools } from "../src/tools/research.js";
 import { perplexityTools } from "../src/tools/perplexity.js";
@@ -97,7 +99,7 @@ function sectionTools(): string {
   // exported modules they use, and constructs its own Registry.
   const r = new Registry();
   const all: EveTool[] = [
-    ...reminderTools, ...noteTools, ...projectTools, ...memoryTools, ...weatherTools,
+    ...reminderTools, ...noteTools, ...projectTools, ...memoryTools, ...skillTools, ...conversationTools, ...weatherTools,
     ...researchTools, ...perplexityTools, ...boardTools, ...ledgerTools, ...designTools,
   ];
   for (const t of all) r.register(t);

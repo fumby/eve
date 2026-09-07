@@ -38,6 +38,11 @@ export interface RuntimeSettings {
   // the config.json map, not a merge — forgetting a project is a thing Umberto
   // can ask for, and a shallow merge has no way to express a removal.
   projects?: Config["projects"];
+  // The model Umberto told her to run on, and the effort to run it at. Set by
+  // the gated set_model tool; applied on the next turn (loadConfig is re-read
+  // every turn, so no restart). Absent = the config.json default.
+  model?: Config["model"];
+  effort?: Config["effort"];
 }
 
 export function loadRuntime(): RuntimeSettings {
@@ -54,11 +59,31 @@ function saveRuntime(patch: RuntimeSettings): void {
   writeFileAtomic(RUNTIME_FILE, JSON.stringify(next, null, 2) + "\n");
 }
 
+// One entry in the fallback chain. Every entry speaks the Anthropic Messages
+// API — baseUrl points at an Anthropic-COMPATIBLE gateway, not at a different
+// wire protocol — and keyEnv names the env var holding its key.
+export interface FallbackModel {
+  model: string;
+  baseUrl?: string;
+  keyEnv?: string;
+}
+
 export interface Config {
   model: string;
+  // Models to try, in order, when `model` is busy or unreachable mid-turn.
+  // Empty is the old behaviour exactly: one attempt, then the error.
+  fallbacks: FallbackModel[];
   effort: "low" | "medium" | "high" | "xhigh" | "max";
   maxTokens: number;
-  voice: { voiceId: string; ttsModel: string };
+  voice: {
+    voiceId: string;
+    ttsModel: string;
+    // The voice for ENGLISH sentences — dormant since 2026-09-06, when
+    // Umberto moved BOTH his languages to one voice (Bella on eleven_v3).
+    // Kept because the routing in tts.ts reactivates untouched if it is ever
+    // set again. Absent = use voiceId for both (single-voice mode).
+    englishVoiceId?: string;
+  };
   // Scribe (ElevenLabs) is the recognizer of record — 90+ languages with real
   // detection. model/language/keyterms configure the Deepgram socket that
   // still powers live captions while speaking, and the fallback.
@@ -126,6 +151,16 @@ export interface Config {
     checkpointAfterExchanges: number;
     // Cheap model for the end-of-session memory extractor.
     extractorModel: string;
+    // Run the extractor mid-session every N completed exchanges, so a long
+    // conversation banks what it learns instead of waiting for a clean close
+    // that may never come. 0 turns the periodic pass off entirely.
+    reviewEveryExchanges: number;
+    // Whether retiring a memory (save_memory with `supersedes`) has to be
+    // confirmed. Off by default: superseding destroys nothing — the old file
+    // stays on disk and one hand-edit brings it back — and gating it would put
+    // it out of reach of every writer that runs with no human attached, which
+    // is precisely where contradictions pile up. Flip it to true to be asked.
+    confirmSupersede: boolean;
   };
 }
 
@@ -159,6 +194,11 @@ export function loadConfig(): Config {
   if (typeof rt.heartbeatPaused === "boolean") cfg.heartbeat.paused = rt.heartbeatPaused;
   if (typeof rt.studiesDir === "string") cfg.studiesDir = rt.studiesDir;
   if (rt.location && typeof rt.location.city === "string") cfg.location = rt.location;
+  // The model/effort Umberto chose through the gate. Shape-checked like every
+  // other runtime field: runtime.json is hand-editable, so garbage here falls
+  // back to the config.json default rather than reaching the provider.
+  if (typeof rt.model === "string" && rt.model) cfg.model = rt.model;
+  if (rt.effort && ["low", "medium", "high", "xhigh", "max"].includes(rt.effort)) cfg.effort = rt.effort;
   // Shape-checked entry by entry, not trusted: data/runtime.json is a plain
   // file a human edits, and a non-string value here would reach path.resolve
   // as an object. A malformed entry is dropped, never crashed on.
@@ -170,6 +210,11 @@ export function loadConfig(): Config {
     cfg.projects = clean;
   }
   cfg.projects ??= {};
+  // An older config.json simply has no fallbacks key; that is the empty chain,
+  // not a crash on the first turn.
+  cfg.fallbacks = Array.isArray(cfg.fallbacks)
+    ? cfg.fallbacks.filter((f) => f && typeof f.model === "string" && f.model)
+    : [];
   return cfg;
 }
 
@@ -177,6 +222,12 @@ export function loadConfig(): Config {
 // visible (and editable) in data/runtime.json.
 export function setHeartbeatPaused(paused: boolean): void {
   saveRuntime({ heartbeatPaused: paused });
+}
+
+// The model/effort Umberto picked through the set_model gate. Persisted here
+// like every other runtime override; applied by loadConfig on the next turn.
+export function setModel(model: string, effort?: Config["effort"]): void {
+  saveRuntime({ model, ...(effort ? { effort } : {}) });
 }
 
 export function setStudiesDir(dir: string): void {
@@ -207,6 +258,15 @@ export function forgetProjectDir(slug: string): boolean {
 export function setLocation(location: Config["location"]): void {
   saveRuntime({ location });
 }
+
+// True only when EVE is running against the REAL checkout. Tools that reach
+// OUTSIDE the filesystem — opening a browser tab on Umberto's Mac, say — cannot
+// be contained by STATE_ROOT, so they ask this instead. It lives here, beside
+// the two constants it compares, because it was re-derived per tool and the
+// second tool to need it did not get it: src/tools/report.ts guarded its
+// `open` and src/tools/food.ts did not, so a sandboxed run popped a real
+// options window on his screen.
+export const isProductionState = (): boolean => STATE_ROOT === ROOT;
 
 export function requireKey(name: string): string {
   const v = process.env[name];

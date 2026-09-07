@@ -1,0 +1,11 @@
+# Hosts allowed to reach EVE's face server (HTTP and WebSocket), in addition
+# to loopback. Copy this file to `config.allowed-hosts` and put your own
+# hostname in it. The tailnet name belongs here when Tailscale Serve
+# terminates TLS in front of her: https://<your-machine>.<your-tailnet>.ts.net
+# is the phone's door. One hostname per line; "#" starts a comment.
+#
+# This file is the ONE place the door is widened, by a human, on purpose — a
+# request can never edit it. An absent file means loopback only, which is the
+# safe default and the documented posture. (See src/face/origin.ts.)
+
+# eve.tail1234.ts.net

@@ -4,6 +4,7 @@
 // questions — one HTTP call, an answer, and a source list.
 import { z } from "zod";
 import type { EveTool } from "../core/registry.js";
+import { guardOutbound } from "../memory/privacy.js";
 import { requireKey } from "../core/config.js";
 import { audit } from "../core/audit.js";
 
@@ -67,6 +68,11 @@ export const perplexityTools: EveTool[] = [
     needsConfirmation: false,
     run: async (input) => {
       const question = String(input.question);
+      // The privacy guard: his address, emails, phone numbers, credentials
+      // never leave through an ungated third-party query. Refusal text
+      // teaches generalising; it never echoes what matched.
+      const refused = guardOutbound(question, "to Perplexity");
+      if (refused) return refused;
       const model = input.depth === "thorough" ? "sonar-pro" : "sonar";
       const started = Date.now();
       const { answer, sources } = await ask(question, model);

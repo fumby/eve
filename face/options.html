@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EVE · Options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --accent: #2dd4a8;
+  --bg: #05070b;
+  --card: rgba(16, 18, 26, 0.85);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #fff;
+  --dim: rgba(255, 255, 255, 0.55);
+  --purple: #7c6fe0;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", -apple-system, system-ui, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  padding: 28px 20px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* fondo: stelle + glow, come la faccia */
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(45, 212, 168, 0.07), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 20% 100%, rgba(124, 111, 224, 0.05), transparent 70%);
+}
+header { max-width: 760px; width: 100%; margin-bottom: 26px; }
+h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+h1 .dot { color: var(--accent); }
+.intro { margin-top: 8px; color: var(--dim); font-size: 15px; line-height: 1.5; max-width: 60ch; }
+.updated { margin-top: 6px; font-size: 11px; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+#cards {
+  max-width: 760px; width: 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color 0.25s, transform 0.25s;
+  animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+.card:hover { border-color: rgba(45, 212, 168, 0.35); transform: translateY(-2px); }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+
+.kind {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--accent); width: fit-content;
+}
+.kind.restaurant { color: #f0c36b; }
+.kind.grocery { color: var(--purple); }
+.kind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.subtitle { font-size: 13.5px; color: var(--dim); line-height: 1.45; }
+.why {
+  font-size: 12.5px; line-height: 1.5; color: rgba(255,255,255,0.75);
+  padding: 9px 11px; border-radius: 10px;
+  background: rgba(45, 212, 168, 0.06);
+  border: 1px solid rgba(45, 212, 168, 0.14);
+}
+.why b { color: var(--accent); font-weight: 600; }
+.meta { display: flex; gap: 14px; font-size: 12.5px; color: var(--dim); margin-top: auto; }
+.meta .price { color: #fff; font-weight: 600; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag {
+  font-size: 10.5px; padding: 3px 8px; border-radius: 20px;
+  background: rgba(255,255,255,0.06); color: var(--dim);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.tag.healthy { color: var(--accent); border-color: rgba(45, 212, 168, 0.3); background: rgba(45,212,168,0.07); }
+
+.actions { display: flex; gap: 10px; margin-top: 4px; }
+a.order {
+  flex: 1; text-align: center; text-decoration: none;
+  padding: 10px 0; border-radius: 11px;
+  background: var(--accent); color: #06231b;
+  font: 600 13.5px "Inter", system-ui, sans-serif;
+  transition: filter 0.2s, transform 0.15s;
+}
+a.order:hover { filter: brightness(1.1); }
+a.order:active { transform: scale(0.98); }
+a.order.ghost {
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--border);
+}
+.empty { text-align: center; color: var(--dim); padding: 60px 0; font-size: 15px; }
+.empty .orb {
+  width: 64px; height: 64px; margin: 0 auto 18px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(45,212,168,0.9), rgba(45,212,168,0.15) 60%, transparent);
+  box-shadow: 0 0 40px rgba(45, 212, 168, 0.3);
+  animation: breathe 3s ease-in-out infinite;
+}
+@keyframes breathe { 50% { opacity: 0.6; transform: scale(0.94); } }
+footer { margin-top: 30px; color: rgba(255,255,255,0.25); font-size: 12px; }
+
+@media (max-width: 640px) {
+  body { padding: 20px 14px 40px; }
+  h1 { font-size: 21px; }
+  #cards { grid-template-columns: 1fr; gap: 12px; }
+  .card { padding: 15px; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <h1>EVE<span class="dot">·</span>options</h1>
+    <p class="intro" id="intro"></p>
+    <p class="updated" id="updated"></p>
+  </header>
+  <div id="cards"></div>
+  <footer>EVE composes these from live research and what she knows about you.</footer>
+<script>
+// /options — la finestra delle opzioni. Legge data/options-window.json dal
+// server (polling leggero: la finestra si aggiorna quando EVE ne apre una
+// nuova, senza refresh manuale).
+let seenAt = null;
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/options", { cache: "no-store" });
+    if (!r.ok) throw new Error();
+    const w = await r.json();
+    if (!w || !w.openedAt || w.openedAt === seenAt) return;
+    seenAt = w.openedAt;
+    document.getElementById("intro").textContent = w.intro ?? "";
+    document.getElementById("updated").textContent =
+      w.openedAt ? new Date(w.openedAt).toLocaleString() : "";
+    const host = document.getElementById("cards");
+    host.replaceChildren();
+    if (!Array.isArray(w.options) || w.options.length === 0) {
+      host.innerHTML = '<div class="empty"><div class="orb"></div>Nothing here yet — ask EVE.</div>';
+      return;
+    }
+    w.options.forEach((o, i) => host.appendChild(card(o, i)));
+  } catch {
+    document.getElementById("cards").innerHTML =
+      '<div class="empty">Can\'t reach EVE\'s server.</div>';
+  }
+}
+
+const KIND_LABEL = { restaurant: "delivery", recipe: "cook it", grocery: "grocery" };
+
+function card(o, i) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.style.animationDelay = `${i * 60}ms`;
+  const tags = (o.tags ?? []).map((t) =>
+    `<span class="tag${t === "healthy" ? " healthy" : ""}">${escapeHtml(t)}</span>`
+  ).join("");
+  const order = o.orderUrl
+    ? `<a class="order" href="${escapeHtml(o.orderUrl)}" target="_blank" rel="noopener">Order · Open</a>`
+    : `<span class="order ghost" style="cursor:default">No link — she'll tell you why</span>`;
+  el.innerHTML = `
+    <span class="kind ${o.kind}">${KIND_LABEL[o.kind] ?? o.kind}</span>
+    <h2>${escapeHtml(o.title)}</h2>
+    <p class="subtitle">${escapeHtml(o.subtitle)}</p>
+    <div class="why"><b>Why this for you:</b> ${escapeHtml(o.why)}</div>
+    <div class="meta"><span class="price">${escapeHtml(o.price ?? "")}</span><span>${escapeHtml(o.eta ?? "")}</span></div>
+    ${tags ? `<div class="tags">${tags}</div>` : ""}
+    <div class="actions">${order}</div>`;
+  return el;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+refresh();
+setInterval(refresh, 4000);
+</script>
+</body>
+</html>

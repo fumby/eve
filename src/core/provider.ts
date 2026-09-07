@@ -1,7 +1,9 @@
 // THE seam between EVE and the model provider. Nothing outside this file may
 // import the Anthropic SDK — swap providers, add retries, or log costs here.
 import Anthropic from "@anthropic-ai/sdk";
-import { loadConfig, requireKey, type Config } from "./config.js";
+import { loadConfig, requireKey, type Config, type FallbackModel } from "./config.js";
+import { audit } from "./audit.js";
+import { addNotice } from "./notices.js";
 
 export type ProviderEvent =
   | { type: "text"; delta: string }
@@ -30,13 +32,154 @@ export interface WebAccess {
 // for a human reading a terminal, never a stack trace.
 export class ProviderError extends Error {}
 
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic({ apiKey: requireKey("ANTHROPIC_API_KEY") });
-  return client;
+// One client per endpoint+key, not one per process: a fallback entry may point
+// at a different Anthropic-compatible endpoint with its own key, and rebuilding
+// the client on every turn would throw away the connection pool.
+const clients = new Map<string, Anthropic>();
+function getClient(entry: Attempt): Anthropic {
+  const cacheKey = `${entry.baseUrl ?? ""}|${entry.keyEnv ?? "ANTHROPIC_API_KEY"}`;
+  let c = clients.get(cacheKey);
+  if (!c) {
+    c = new Anthropic({
+      apiKey: requireKey(entry.keyEnv ?? "ANTHROPIC_API_KEY"),
+      ...(entry.baseUrl ? { baseURL: entry.baseUrl } : {}),
+    });
+    clients.set(cacheKey, c);
+  }
+  return c;
 }
 
-export async function* streamTurn(opts: {
+// ── the fallback chain ─────────────────────────────────────────────────────
+// A 429 or a 529 used to end the turn. In a terminal that is an annoyance you
+// retype; mid-sentence in a spoken conversation it is EVE stopping dead, and
+// there is no "try again" button in a voice UI.
+//
+// So the configured model is entry 0 of a chain, and config.fallbacks are the
+// rest. Deliberately NOT a provider abstraction: every entry speaks the
+// Anthropic Messages API, optionally at another base URL (any
+// Anthropic-compatible gateway) with its own key. Generalising the wire
+// protocol would trade a real optimisation — ~13k tokens of prompt caching
+// tuned against one provider — for flexibility nobody here uses.
+export interface Attempt {
+  model: string;
+  baseUrl?: string;
+  keyEnv?: string;
+}
+
+// Sticky for the life of the process. Swapping back and forth per turn would
+// mean re-paying the cache write on every alternation, and a model that just
+// refused you is usually still refusing thirty seconds later.
+let activeEntry = 0;
+
+// Called when Umberto picks a new model (set_model): a stale fallback slot
+// from a previous outage must not decide which entry the NEXT turn starts
+// from. The sticky index exists to save cache writes mid-outage, not to
+// override an explicit human choice.
+export function resetChain(): void {
+  activeEntry = 0;
+}
+
+export function chain(cfg: Config): Attempt[] {
+  return [
+    { model: cfg.model },
+    ...cfg.fallbacks.map((f: FallbackModel) => ({
+      model: f.model,
+      ...(f.baseUrl ? { baseUrl: f.baseUrl } : {}),
+      ...(f.keyEnv ? { keyEnv: f.keyEnv } : {}),
+    })),
+  ];
+}
+
+// Worth trying the next entry: the model is busy, missing, or unreachable.
+// NOT auth. A rejected key is a broken .env, and falling past it would hide
+// the one error whose message already says exactly what to fix — while
+// quietly running the whole session somewhere Umberto did not choose.
+export function worthFallingBack(err: unknown): boolean {
+  if (err instanceof Anthropic.RateLimitError) return true;
+  if (err instanceof Anthropic.APIConnectionError) return true;
+  if (err instanceof Anthropic.NotFoundError) return true;
+  if (err instanceof Anthropic.APIError) {
+    const status = (err as { status?: number }).status;
+    // 529 is Anthropic's "overloaded" and is not one of the SDK's own classes.
+    return typeof status === "number" && status >= 500;
+  }
+  return false;
+}
+
+// THE entry point. Walks the chain from wherever this process currently is,
+// and yields the first attempt that gets as far as producing an event.
+//
+// The one hard rule: once anything has been yielded, there is no falling back.
+// A retry after partial output would repeat the text — and on the voice path
+// that is EVE saying the first half of a sentence twice, which is worse than
+// the error it was trying to hide.
+//
+// A caller that PINS a model (the extractor, the board seats) gets a single
+// attempt, as before. The chain exists for the conversation; a background job
+// that asked for a cheap model must not quietly land on an expensive one.
+export async function* streamTurn(opts: Parameters<typeof attemptTurn>[1]): AsyncGenerator<ProviderEvent> {
+  const cfg = loadConfig();
+  if (opts.model) {
+    yield* attemptTurn({ model: opts.model }, opts);
+    return;
+  }
+  const entries = chain(cfg);
+  const from = entries[activeEntry]!;
+  yield* runChain(entries, (entry) => attemptTurn(entry, opts), activeEntry, (won) => {
+    if (won !== activeEntry) announceSwap(from, entries[won]!, won);
+  });
+}
+
+// The walk itself, with the attempt injected. Split out for one reason: the
+// behaviour worth protecting here is what happens on FAILURE, and reaching it
+// through the real client would mean waiting for a real rate limit. The tests
+// hand it a generator that throws on cue.
+export async function* runChain(
+  entries: Attempt[],
+  attempt: (entry: Attempt) => AsyncGenerator<ProviderEvent>,
+  start: number,
+  onWin: (index: number) => void,
+): AsyncGenerator<ProviderEvent> {
+  if (entries.length === 0) {
+    throw new ProviderError("The model chain is empty — check `model` in config.json.");
+  }
+  for (let i = Math.min(Math.max(0, start), entries.length - 1); i < entries.length; i++) {
+    let yielded = false;
+    try {
+      for await (const ev of attempt(entries[i]!)) {
+        yielded = true;
+        yield ev;
+      }
+      onWin(i);
+      return;
+    } catch (err) {
+      const last = i === entries.length - 1;
+      if (yielded || last || !worthFallingBack(err)) throw toProviderError(err);
+      audit("provider_fallback", {
+        from: entries[i]!.model,
+        to: entries[i + 1]!.model,
+        reason: err instanceof Error ? err.message.slice(0, 160) : String(err),
+      });
+    }
+  }
+}
+
+// Sticky, and said out loud. A silent downgrade would have EVE sounding
+// different for the rest of the session with nothing to explain why.
+function announceSwap(from: Attempt, to: Attempt, index: number): void {
+  activeEntry = index;
+  audit("provider_switched", { from: from.model, to: to.model });
+  addNotice(
+    "provider",
+    `${from.model} wasn't answering, so I switched to ${to.model} and carried on. ` +
+      `I'll stay on it until you restart me.`,
+    "quiet",
+  );
+}
+
+// One attempt against one entry in the chain. Everything below this line is
+// exactly what streamTurn used to be, with the model coming from the entry.
+async function* attemptTurn(entry: Attempt, opts: {
   // A plain string goes through untouched; an array of blocks lets callers
   // mark a stable prefix with cache_control themselves.
   system: string | Anthropic.Messages.TextBlockParam[];
@@ -80,8 +223,8 @@ export async function* streamTurn(opts: {
 
   let stream;
   try {
-    stream = getClient().messages.stream({
-      model: opts.model ?? cfg.model,
+    stream = getClient(entry).messages.stream({
+      model: entry.model,
       max_tokens: opts.maxTokens ?? cfg.maxTokens,
       ...(opts.effort === null ? {} : { output_config: { effort: opts.effort ?? cfg.effort } }),
       system: opts.system,

@@ -11,14 +11,19 @@ let radialTex = null;
 export function radialTexture() {
   if (radialTex) return radialTex; // generate once, reuse everywhere
   const c = document.createElement("canvas");
-  c.width = c.height = 128;
+  c.width = c.height = 256;
   const ctx = c.getContext("2d");
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  // A short white plateau, then a long smooth tail: the glow reads as a light
+  // source with air around it, not a hard-edged disc. The extra mid stop is
+  // what keeps large coronas from banding.
   g.addColorStop(0, "rgba(255,255,255,1)");
-  g.addColorStop(0.25, "rgba(255,255,255,0.55)");
+  g.addColorStop(0.12, "rgba(255,255,255,0.85)");
+  g.addColorStop(0.32, "rgba(255,255,255,0.42)");
+  g.addColorStop(0.62, "rgba(255,255,255,0.12)");
   g.addColorStop(1, "rgba(255,255,255,0)");
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillRect(0, 0, 256, 256);
   radialTex = new THREE.CanvasTexture(c);
   return radialTex;
 }
@@ -94,7 +99,12 @@ const INST_FRAG = /* glsl */ `
     float core = pow(facing, 2.5);
     float rim  = pow(1.0 - facing, 2.0);
     vec3 base = vInstanceColor * (0.45 + 0.75 * vFresh);
-    vec3 col = mix(base, vec3(1.0), core * 0.85) + base * rim * 1.4;
+    // Softer color grade: nudge the hot core toward warm white (not clipped
+    // pure white) and lift the shadow side with a hint of the hue so beads
+    // never read as flat gray discs when the fresnel is edge-on.
+    vec3 hot = mix(vec3(1.0), vec3(1.0, 0.98, 0.94), 0.5);
+    vec3 col = mix(base, hot, core * 0.85) + base * rim * 1.4;
+    col += base * 0.05; // ambient floor: nothing in this scene is fully black
     gl_FragColor = vec4(col, (core * 0.95 + rim * 0.6) * uOpacity);
   }`;
 
@@ -128,7 +138,11 @@ const AURA_FRAG = /* glsl */ `
   void main() {
     float d = length(vUv) * 2.0;
     float a = pow(max(1.0 - d, 0.0), 2.2);
-    gl_FragColor = vec4(vInstanceColor * (0.5 + 0.8 * vFresh), a * uOpacity * (0.25 + 0.4 * vFresh));
+    // Two-lobe falloff: a soft inner glow + a wide faint outer breath. The
+    // single-power curve flattened in the middle and died too abruptly at the
+    // rim; this keeps a luminous center while the halo tails off with air.
+    float inner = pow(max(1.0 - d, 0.0), 5.0) * 0.5;
+    gl_FragColor = vec4(vInstanceColor * (0.5 + 0.8 * vFresh), (a * 0.72 + inner) * uOpacity * (0.25 + 0.4 * vFresh));
   }`;
 
 function withInstanceColorVarying(shader) {
@@ -209,14 +223,21 @@ export function buildCore(color = "#2DD4A8") {
   const nucleus = new THREE.Group();
   group.add(nucleus);
 
+  // Warm-white nucleus: pure white clips to a flat disc under bloom; a hint
+  // of warmth keeps it reading as a living star rather than a paper hole.
   const inner = new THREE.Mesh(
     new THREE.SphereGeometry(0.62, 32, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending }),
+    new THREE.MeshBasicMaterial({ color: 0xfff6ec, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending }),
   );
   nucleus.add(inner);
 
   const shell = new THREE.Mesh(new THREE.SphereGeometry(1.15, 32, 24), glowMaterial(color, 0.9));
   nucleus.add(shell);
+
+  // A faint second shell: the first fresnel dies too quickly to read as
+  // atmosphere. This one is larger and dimmer — depth without a new light.
+  const shellWide = new THREE.Mesh(new THREE.SphereGeometry(1.6, 32, 24), glowMaterial(color, 0.32));
+  nucleus.add(shellWide);
 
   const tex = radialTexture();
   const coronaTight = new THREE.Sprite(
@@ -240,7 +261,7 @@ export function buildCore(color = "#2DD4A8") {
   dynamic.rotation.z = 0.4;
   group.add(stable, dynamic);
 
-  return { group, nucleus, inner, shell, coronaTight, coronaWide, stable, dynamic };
+  return { group, nucleus, inner, shell, shellWide, coronaTight, coronaWide, stable, dynamic };
 }
 
 // ---------------------------------------------------------------- starfield
@@ -272,23 +293,97 @@ export function buildStarfield(count = 600) {
       attribute float aPhase; attribute float aSize;
       uniform float uTime;
       varying float vTw;
+      varying float vWarm;
       void main() {
-        // peaks cross the bloom threshold, which is what makes them sparkle
-        vTw = 0.35 + 0.9 * (0.5 + 0.5 * sin(uTime * 1.1 + aPhase));
+        // peaks cross the bloom threshold, which is what makes them sparkle.
+        // Two incommensurate frequencies: a single sine blinks in visible
+        // unison across the field, two read as individual stars.
+        float tw1 = 0.5 + 0.5 * sin(uTime * 1.1 + aPhase);
+        float tw2 = 0.5 + 0.5 * sin(uTime * 2.3 + aPhase * 2.7);
+        vTw = 0.35 + 0.9 * (0.6 * tw1 + 0.4 * tw2);
+        // Deterministic tint from the phase: most stars stay cool blue-white,
+        // a few go warm, a few slightly teal — colour variety without another
+        // buffer to upload.
+        vWarm = fract(aPhase * 0.73);
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         gl_PointSize = aSize * (150.0 / -mv.z);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
       varying float vTw;
+      varying float vWarm;
       void main() {
         float d = length(gl_PointCoord - 0.5);
         if (d > 0.5) discard;
         float a = smoothstep(0.5, 0.0, d) * vTw;
-        gl_FragColor = vec4(0.86, 0.92, 1.0, a * 0.85);
+        vec3 cool = vec3(0.82, 0.89, 1.0);
+        vec3 warm = vec3(1.0, 0.93, 0.82);
+        vec3 teal = vec3(0.75, 0.96, 0.90);
+        vec3 col = vWarm < 0.12 ? teal : (vWarm > 0.88 ? warm : cool);
+        gl_FragColor = vec4(col, a * 0.85);
       }`,
   });
   return new THREE.Points(geo, mat);
+}
+
+// ---------------------------------------------------------------- dust
+// A near-field layer of large, very faint motes. Pure depth cue: between the
+// starfield (far, tiny) and the nodes (near, sharp) it makes the camera's
+// motion legible. One draw call, ~120 points, all drift computed in the
+// vertex shader from uTime — nothing allocated per frame.
+export function buildDust(count = 120) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(count * 3);
+  const phase = new Float32Array(count);
+  const size = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    // a thick shell around the map, biased low so it doesn't occlude the sky
+    const r = 18 + Math.random() * 34;
+    const t = Math.random() * Math.PI * 2;
+    const p = Math.acos(2 * Math.random() - 1);
+    pos[i * 3] = r * Math.sin(p) * Math.cos(t);
+    pos[i * 3 + 1] = r * Math.cos(p) * 0.7;
+    pos[i * 3 + 2] = r * Math.sin(p) * Math.sin(t);
+    phase[i] = Math.random() * 6.283;
+    size[i] = 14 + Math.random() * 30;
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("aPhase", new THREE.BufferAttribute(phase, 1));
+  geo.setAttribute("aSize", new THREE.BufferAttribute(size, 1));
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uTime },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      attribute float aPhase; attribute float aSize;
+      uniform float uTime;
+      varying float vA;
+      void main() {
+        // slow vertical wander, each mote on its own phase; amplitude in
+        // world units so it stays a drift, never a float
+        vec3 p = position;
+        p.y += sin(uTime * 0.12 + aPhase) * 1.6;
+        p.x += cos(uTime * 0.09 + aPhase * 1.3) * 1.2;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = aSize * (150.0 / -mv.z);
+        vA = 0.5 + 0.5 * sin(uTime * 0.5 + aPhase * 3.1);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      varying float vA;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        if (d > 0.5) discard;
+        float a = smoothstep(0.5, 0.0, d);
+        a *= a; // long soft tail, nothing with an edge
+        gl_FragColor = vec4(0.55, 0.78, 0.72, a * (0.025 + 0.02 * vA));
+      }`,
+  });
+  const points = new THREE.Points(geo, mat);
+  points.frustumCulled = false; // positions wander in the shader; CPU bounds lie
+  return points;
 }
 
 // ---------------------------------------------------------------- membrane

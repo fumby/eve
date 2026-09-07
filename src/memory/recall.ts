@@ -64,7 +64,10 @@ async function documentVectors(
     if (hit && hit.hash === h) vectors.set(m.name, hit.vector);
     else missing.push({ name: m.name, text: memText(m), hash: h });
   }
-  const live = new Set(memories.map((m) => m.name));
+  // Pruned against every memory ON DISK, not just the ones this call asked
+  // for: pruning against the caller's slice would drop retired vectors on an
+  // ordinary recall and re-buy them from Voyage on the next historical one.
+  const live = new Set(listMemories({ includeRetired: true }).map((m) => m.name));
   let dirty = false;
   for (const name of Object.keys(cache)) {
     if (!live.has(name)) {
@@ -107,8 +110,16 @@ export interface RecallResult {
   how: "semantic" | "lexical";
 }
 
-export async function recallMemories(query: string, limit = MAX_HITS): Promise<RecallResult> {
-  const memories = listMemories();
+// Retired memories are excluded by default — a superseded fact competing with
+// the one that replaced it is exactly the contradiction supersession exists to
+// end. `includeRetired` is for the one question that needs them: "what did you
+// used to think?"
+export async function recallMemories(
+  query: string,
+  limit = MAX_HITS,
+  opts: { includeRetired?: boolean } = {},
+): Promise<RecallResult> {
+  const memories = listMemories(opts);
   if (memories.length === 0) return { hits: [], how: "lexical" };
 
   const key = process.env.VOYAGE_API_KEY;

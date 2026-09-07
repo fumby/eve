@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { STATE_ROOT } from "../core/config.js";
+import { writeFileAtomic } from "../core/atomic.js";
 
 export const MEMORY_TYPES = ["me", "style", "project", "personal", "reference"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
@@ -24,6 +25,41 @@ export interface StoredMemory {
   hook: string; // one line, what the index and search see first
   created: string; // YYYY-MM-DD, when first written
   body: string; // the fact + why it matters + how to apply it
+  // ── Source provenance. Where the fact came from and how much to trust it.
+  // A memory Umberto explicitly told EVE and one the Haiku extractor guessed
+  // from a transcript are different things — the first is confirmed, the
+  // second is an inference. The review flagged this: "A statement you
+  // explicitly confirmed should be distinguishable from a model inference."
+  source?: "user" | "extractor" | "core"; // who said it
+  confirmed?: boolean; // did Umberto explicitly confirm it?
+  verified?: string; // YYYY-MM-DD, last date it was checked against reality
+  // ── Supersession. Facts change, and until now a corrected fact was simply
+  // saved beside the old one: both stayed in the index, both came back from
+  // recall, and nothing said which was current. So contradictions accumulated
+  // and EVE got to pick. A memory that replaces another names it in
+  // `supersedes`; the replaced file is stamped with `supersededBy` and drops
+  // out of the index and out of recall — but is NEVER deleted. It stays on
+  // disk, readable, one hand-edit away from coming back.
+  //
+  // `supersededBy` is stored on the RETIRED file rather than derived by
+  // scanning every other memory for a pointer at it: "is this current?" is
+  // then a property of the file in your hand, which is what makes the filter
+  // in listMemories() cheap and what makes a hand-edit enough to undo it.
+  supersedes?: string; // this memory replaced that one
+  supersededBy?: string; // this memory WAS replaced by that one — retired
+  supersededOn?: string; // YYYY-MM-DD, when it was retired
+  // ── Expiry. Some memories are true only until a date ("voucher valid
+  // until 1 September"). `expires` is that date; the weekly hygiene scan
+  // flags a memory whose expiry has passed so Umberto can retire or renew
+  // it — the scan proposes, it never touches the store.
+  expires?: string; // YYYY-MM-DD — stale after this date
+  // ── Origin. The 2026-09-06 memory audit's central finding: a memory was
+  // a plausible summary with no way back to the turn that produced it.
+  // `origin` names the conversation (and turn, when known) a memory came
+  // from, so "where did you get that?" is one read_conversation away.
+  // Absent on older memories and hand edits — honestly unknown, never
+  // guessed.
+  origin?: string; // conversation id (+ "#turn" when known)
 }
 
 const STORE_DIR = path.join(STATE_ROOT, "memory", "store");
@@ -133,10 +169,49 @@ function parseMemoryFile(file: string): StoredMemory | null {
     hook,
     created: meta.created ?? "",
     body: m[2]!.trim(),
+    ...(meta.source ? { source: meta.source as "user" | "extractor" | "core" } : {}),
+    ...(meta.confirmed ? { confirmed: meta.confirmed === "true" } : {}),
+    ...(meta.verified ? { verified: meta.verified } : {}),
+    // Absent is the common case and must stay undefined rather than "": the
+    // retirement filter tests truthiness, and an empty string read as "retired"
+    // would hide every memory in the store at once.
+    ...(meta.supersedes ? { supersedes: meta.supersedes } : {}),
+    ...(meta.supersededBy ? { supersededBy: meta.supersededBy } : {}),
+    ...(meta.supersededOn ? { supersededOn: meta.supersededOn } : {}),
+    // Same absent-is-undefined rule as the supersession fields: an empty
+    // `expires:` must not read as "expired at the epoch".
+    ...(meta.expires ? { expires: meta.expires } : {}),
+    ...(meta.origin ? { origin: meta.origin } : {}),
   };
 }
 
-export function listMemories(): StoredMemory[] {
+// The bytes of a memory file, in one place: saving a memory and stamping a
+// retired one both go through here, so a field can never be written by one
+// path and dropped by the other. Optional lines are omitted entirely when
+// absent — an empty `supersededBy:` would parse back as a retired memory.
+function renderMemoryFile(mem: StoredMemory): string {
+  const lines = [
+    `name: ${mem.name}`,
+    `type: ${mem.type}`,
+    `hook: ${mem.hook}`,
+    `created: ${mem.created}`,
+  ];
+  if (mem.source) lines.push(`source: ${mem.source}`);
+  if (mem.confirmed) lines.push(`confirmed: ${mem.confirmed}`);
+  if (mem.verified) lines.push(`verified: ${mem.verified}`);
+  if (mem.supersedes) lines.push(`supersedes: ${mem.supersedes}`);
+  if (mem.supersededBy) lines.push(`supersededBy: ${mem.supersededBy}`);
+  if (mem.supersededOn) lines.push(`supersededOn: ${mem.supersededOn}`);
+  if (mem.expires) lines.push(`expires: ${mem.expires}`);
+  if (mem.origin) lines.push(`origin: ${mem.origin}`);
+  return `---\n${lines.join("\n")}\n---\n\n${mem.body}\n`;
+}
+
+// Current memories only, unless asked otherwise. EVERY reader that feeds the
+// model — the prompt index, recall, the extractor's duplicate check, the mind
+// map — goes through here, so a retired memory stops competing the moment it is
+// stamped, in one place rather than four.
+export function listMemories(opts: { includeRetired?: boolean } = {}): StoredMemory[] {
   let files: string[];
   try {
     files = fs.readdirSync(STORE_DIR);
@@ -147,7 +222,17 @@ export function listMemories(): StoredMemory[] {
     .filter((f) => f.endsWith(".md") && f !== "INDEX.md")
     .map(parseMemoryFile)
     .filter((x): x is StoredMemory => x !== null)
+    .filter((m) => opts.includeRetired || !m.supersededBy)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// The retired ones, newest retirement first. Nothing that reaches the model
+// reads this — it exists so INDEX.md can show a human what was set aside and
+// what replaced it, and so recall can be asked for history on purpose.
+export function retiredMemories(): StoredMemory[] {
+  return listMemories({ includeRetired: true })
+    .filter((m) => m.supersededBy)
+    .sort((a, b) => (b.supersededOn ?? "").localeCompare(a.supersededOn ?? ""));
 }
 
 export function getMemory(name: string): StoredMemory | null {
@@ -198,6 +283,12 @@ export function saveMemory(
     type: MemoryType;
     hook: string;
     body: string;
+    supersedes?: string;
+    source?: "user" | "extractor" | "core";
+    confirmed?: boolean;
+    verified?: string;
+    expires?: string;
+    origin?: string;
   },
   // Umberto answered the confirmation gate himself and said yes. A SEPARATE
   // argument, deliberately not part of `input`: `input` is what a model's
@@ -220,22 +311,85 @@ export function saveMemory(
     name = candidate;
   }
   const existing = getMemory(name);
+
+  // Everything that can refuse the supersession is checked HERE, before the
+  // new memory is written — a retirement that turns out to be impossible must
+  // not leave a half-done pair behind.
+  const retiring = input.supersedes?.trim();
+  if (retiring) {
+    const target = getMemory(retiring);
+    if (!target) {
+      throw new Error(
+        `cannot supersede "${retiring}" — no stored memory by that name. ` +
+          `Check the index and use the exact name, or save without superseding.`,
+      );
+    }
+    if (target.name === name) {
+      throw new Error(
+        `a memory cannot supersede itself — to change [${name}] in place, use update_memory.`,
+      );
+    }
+    if (target.supersededBy) {
+      // Reasoning from a retired memory is a real error worth surfacing: it is
+      // out of the index and out of recall, so seeing it at all means something
+      // upstream is stale.
+      throw new Error(
+        `[${retiring}] was already retired by [${target.supersededBy}] — supersede that one instead.`,
+      );
+    }
+  }
+
   const mem: StoredMemory = {
     name,
     type: input.type,
     hook,
     created: existing?.created || new Date().toISOString().slice(0, 10),
     body,
+    ...(input.source ? { source: input.source } : {}),
+    ...(input.confirmed ? { confirmed: input.confirmed } : {}),
+    ...(input.verified ? { verified: input.verified } : {}),
+    ...(input.expires ? { expires: input.expires } : {}),
+    ...(input.origin ? { origin: input.origin } : {}),
+    ...(retiring ? { supersedes: retiring } : {}),
   };
   fs.mkdirSync(STORE_DIR, { recursive: true });
   const file = path.join(STORE_DIR, `${name}.md`);
   trashExisting(file, name);
-  fs.writeFileSync(
-    file,
-    `---\nname: ${mem.name}\ntype: ${mem.type}\nhook: ${mem.hook}\ncreated: ${mem.created}\n---\n\n${mem.body}\n`,
-  );
+  // Atomic since a background reviewer writes here too: a reader that catches a
+  // half-written file sees a memory with no hook, and parseMemoryFile drops
+  // those silently — a memory that vanishes for one read and comes back is
+  // worse to debug than one that was never saved.
+  writeFileAtomic(file, renderMemoryFile(mem));
+
+  // ORDER IS LOAD-BEARING. The replacement is on disk before the old one is
+  // retired, so the failure mode of a crash between the two is a visible
+  // contradiction (both live — today's normal state), never a silent hole
+  // where a retired memory has nothing standing in for it.
+  if (retiring) {
+    try {
+      stampRetired(retiring, name);
+    } catch (err) {
+      throw new Error(
+        `[${name}] was saved, but [${retiring}] could NOT be retired ` +
+          `(${err instanceof Error ? err.message : String(err)}) — both are live and they ` +
+          `may contradict each other. Tell Umberto rather than retrying blindly.`,
+      );
+    }
+  }
   writeIndex();
   return mem;
+}
+
+// Stamps the retirement onto the outgoing memory. Rewrites the file rather
+// than deleting it: the whole promise of supersession is that the old fact is
+// still there to read, so this must never be a deletion in disguise.
+function stampRetired(name: string, by: string): void {
+  const mem = getMemory(name);
+  if (!mem) throw new Error(`[${name}] disappeared between the check and the write`);
+  writeFileAtomic(
+    path.join(STORE_DIR, `${name}.md`),
+    renderMemoryFile({ ...mem, supersededBy: by, supersededOn: new Date().toISOString().slice(0, 10) }),
+  );
 }
 
 export function deleteMemory(name: string): StoredMemory | null {
@@ -255,18 +409,36 @@ export function renderIndex(): string {
   for (const t of MEMORY_TYPES) {
     const of = all.filter((m) => m.type === t);
     if (of.length === 0) continue;
-    parts.push(`${TYPE_LABELS[t]}:\n${of.map((m) => `- [${m.name}] ${m.hook}`).join("\n")}`);
+    parts.push(`${TYPE_LABELS[t]}:\n${of.map((m) => {
+      const provenance = m.confirmed ? " ✓" : m.source === "extractor" ? " ~" : "";
+      const age = m.verified ? ` (verified ${m.verified})` : "";
+      return `- [${m.name}] ${m.hook}${provenance}${age}`;
+    }).join("\n")}`);
   }
   return parts.join("\n\n");
 }
 
 function writeIndex(): void {
   fs.mkdirSync(STORE_DIR, { recursive: true });
-  fs.writeFileSync(
+  // The retired list is written HERE and nowhere else. renderIndex() rides in
+  // the cached system prompt every turn, so putting history there would cost
+  // tokens forever to say what EVE no longer believes; INDEX.md is the file a
+  // human opens, and that is exactly who the list is for.
+  const retired = retiredMemories();
+  const history =
+    retired.length === 0
+      ? ""
+      : "\n\n## Retired (kept on disk, out of the index and out of recall)\n" +
+        retired
+          .map((m) => `- [${m.name}] ${m.hook}\n  → replaced by [${m.supersededBy}] on ${m.supersededOn || "an unrecorded date"}`)
+          .join("\n");
+  writeFileAtomic(
     INDEX_FILE,
     "# EVE's memory index\n" +
-      "Auto-generated from the memory files — edit or delete THOSE, not this list.\n\n" +
+      "Auto-generated from the memory files — edit or delete THOSE, not this list.\n" +
+      "To bring a retired memory back, delete its `supersededBy:` line by hand.\n\n" +
       renderIndex() +
+      history +
       "\n",
   );
 }
